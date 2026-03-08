@@ -2,30 +2,22 @@ import streamlit as st
 import json
 import requests
 from datetime import datetime
+import random
 
-# ─── PAGE CONFIG ───────────────────────────────────────────────────────────────
-st.set_page_config(page_title="FinQuest 🏦", page_icon="🏦", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="FinQuest EIF", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
 
-# ─── FIREBASE CONFIG ───────────────────────────────────────────────────────────
-# SETUP (5 minuti):
-# 1. Vai su https://console.firebase.google.com → crea progetto "finquest-leaderboard"
-# 2. Firestore Database → Create database → Start in test mode
-# 3. Copia il Project ID e incollalo qui sotto
-# 4. In Firestore Rules: allow read, write: if true;  (solo per testing — proteggere in produzione)
-FIREBASE_PROJECT_ID = "finquest-leaderboard"  # ← CAMBIA CON IL TUO PROJECT ID
+# ─── FIREBASE ─────────────────────────────────────────────────────────────────
+FIREBASE_PROJECT_ID = "finquest-leaderboard"
 
-def firebase_get_all(collection):
+def firebase_get_all(col):
     try:
-        url = f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT_ID}/databases/(default)/documents/{collection}"
-        r = requests.get(url, timeout=5)
-        if r.status_code == 200:
-            return r.json().get("documents", [])
-    except: pass
-    return []
+        r = requests.get(f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT_ID}/databases/(default)/documents/{col}", timeout=5)
+        return r.json().get("documents", []) if r.status_code == 200 else []
+    except: return []
 
-def firebase_set(collection, doc_id, data):
+def firebase_set(col, doc_id, data):
     try:
-        url = f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT_ID}/databases/(default)/documents/{collection}/{doc_id}"
+        url = f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT_ID}/databases/(default)/documents/{col}/{doc_id}"
         fields = {}
         for k, v in data.items():
             if isinstance(v, int): fields[k] = {"integerValue": str(v)}
@@ -35,618 +27,892 @@ def firebase_set(collection, doc_id, data):
         requests.patch(url, json={"fields": fields}, timeout=5)
     except: pass
 
-def parse_fb_doc(doc):
+def parse_fb(doc):
     if not doc or "fields" not in doc: return None
-    result = {}
+    r = {}
     for k, v in doc["fields"].items():
-        if "integerValue" in v: result[k] = int(v["integerValue"])
-        elif "doubleValue" in v: result[k] = float(v["doubleValue"])
+        if "integerValue" in v: r[k] = int(v["integerValue"])
+        elif "doubleValue" in v: r[k] = float(v["doubleValue"])
         elif "stringValue" in v:
             val = v["stringValue"]
-            try: result[k] = json.loads(val)
-            except: result[k] = val
-    return result
+            try: r[k] = json.loads(val)
+            except: r[k] = val
+    return r
 
 def get_leaderboard():
     docs = firebase_get_all("studenti")
-    entries = [e for e in [parse_fb_doc(d) for d in docs] if e]
+    entries = [e for e in [parse_fb(d) for d in docs] if e]
     return sorted(entries, key=lambda x: x.get("xp", 0), reverse=True)
 
 def save_progress():
     if not st.session_state.get("registrato"): return
     lv, titolo = get_livello(st.session_state.xp)
-    doc_id = st.session_state.nome_studente.lower().replace(" ", "_").replace(".", "")[:50]
+    doc_id = st.session_state.nome.lower().replace(" ", "_").replace(".", "")[:50]
     firebase_set("studenti", doc_id, {
-        "nome": st.session_state.nome_studente,
-        "xp": st.session_state.xp,
-        "missioni": len(st.session_state.missioni_completate),
-        "streak": st.session_state.streak,
-        "badge": len(st.session_state.badge_guadagnati),
-        "livello": lv,
-        "titolo": titolo,
+        "nome": st.session_state.nome, "xp": st.session_state.xp,
+        "missioni": len(st.session_state.completate), "streak": st.session_state.streak,
+        "badge": len(st.session_state.badge), "livello": lv, "titolo": titolo,
         "aggiornato": datetime.now().strftime("%d/%m/%Y %H:%M")
     })
 
-# ─── CSS ───────────────────────────────────────────────────────────────────────
+# ─── CSS ─────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Syne:wght@700;800&display=swap');
-* { font-family: 'Space Grotesk', sans-serif; }
-.stApp { background: linear-gradient(135deg, #060b14 0%, #0a0e1a 50%, #060b14 100%); }
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+  --ink:    #0C0E14;
+  --paper:  #F5F0E8;
+  --cream:  #EDE8DC;
+  --gold:   #C9A84C;
+  --gold2:  #E8C876;
+  --rust:   #C4522A;
+  --teal:   #2A7B7C;
+  --teal2:  #3AABA3;
+  --slate:  #3D4A5C;
+  --mist:   #8A94A6;
+  --red:    #BF3B3B;
+  --green:  #2E7D52;
+  --blue:   #2C5F8A;
+  --purple: #5C3D8A;
+}
+
+* { font-family: 'Outfit', sans-serif; box-sizing: border-box; }
+html, body { background: var(--ink) !important; }
+.stApp { background: var(--ink) !important; }
 #MainMenu, footer, header { visibility: hidden; }
+
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #080d17 0%, #0d1320 100%);
-    border-right: 1px solid rgba(99,179,237,0.1);
+  background: #080A10 !important;
+  border-right: 1px solid rgba(201,168,76,0.15) !important;
 }
-.hero-title {
-    font-family: 'Syne', sans-serif; font-size: 3.8rem; font-weight: 800;
-    background: linear-gradient(135deg, #63b3ed 0%, #a78bfa 50%, #f6ad55 100%);
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
-    text-align: center; letter-spacing: -2px;
-    filter: drop-shadow(0 0 40px rgba(99,179,237,0.25));
+section[data-testid="stSidebar"] > div { background: transparent !important; }
+
+/* Typography */
+.serif { font-family: 'DM Serif Display', serif; }
+.mono  { font-family: 'DM Mono', monospace; }
+
+/* Masthead */
+.masthead {
+  background: linear-gradient(135deg, #0C0E14 0%, #111520 50%, #0C0E14 100%);
+  border-bottom: 2px solid var(--gold);
+  padding: 28px 40px 22px;
+  margin: -20px -20px 32px;
+  position: relative;
+  overflow: hidden;
 }
-.hero-sub { text-align: center; color: #334155; font-size: 0.82rem; margin-top: 6px; letter-spacing: 4px; text-transform: uppercase; }
-.xp-bar-container { background: rgba(10,14,26,0.9); border-radius: 50px; height: 10px; overflow: hidden; border: 1px solid rgba(99,179,237,0.12); }
-.xp-bar-fill { height: 100%; border-radius: 50px; background: linear-gradient(90deg, #63b3ed, #a78bfa, #f6ad55); box-shadow: 0 0 8px rgba(99,179,237,0.35); transition: width 1s ease; }
-.badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; }
-.badge-blue   { background: rgba(99,179,237,0.1);  color: #63b3ed; border: 1px solid rgba(99,179,237,0.22); }
-.badge-green  { background: rgba(104,211,145,0.1); color: #68d391; border: 1px solid rgba(104,211,145,0.22); }
-.badge-red    { background: rgba(252,129,129,0.1); color: #fc8181; border: 1px solid rgba(252,129,129,0.22); }
-.badge-gold   { background: rgba(246,173,85,0.1);  color: #f6ad55; border: 1px solid rgba(246,173,85,0.22); }
-.badge-purple { background: rgba(167,139,250,0.1); color: #a78bfa; border: 1px solid rgba(167,139,250,0.22); }
-.badge-teal   { background: rgba(94,234,212,0.1);  color: #5eead4; border: 1px solid rgba(94,234,212,0.22); }
-.badge-orange { background: rgba(251,146,60,0.1);  color: #fb923c; border: 1px solid rgba(251,146,60,0.22); }
+.masthead::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 39px,
+    rgba(201,168,76,0.04) 39px, rgba(201,168,76,0.04) 40px
+  ), repeating-linear-gradient(
+    90deg, transparent, transparent 39px,
+    rgba(201,168,76,0.04) 39px, rgba(201,168,76,0.04) 40px
+  );
+  pointer-events: none;
+}
+.masthead-date {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--gold);
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+  opacity: 0.7;
+}
+.masthead-title {
+  font-family: 'DM Serif Display', serif;
+  font-size: 4.5rem;
+  color: var(--paper);
+  letter-spacing: -3px;
+  line-height: 0.9;
+  margin-bottom: 6px;
+}
+.masthead-rule {
+  display: flex; align-items: center; gap: 14px; margin: 12px 0 8px;
+}
+.masthead-rule::before, .masthead-rule::after {
+  content: ''; flex: 1; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+}
+.masthead-subtitle {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.62rem; letter-spacing: 4px;
+  color: var(--mist); text-transform: uppercase;
+}
+
+/* Cards */
+.card {
+  background: #10131C;
+  border: 1px solid rgba(201,168,76,0.12);
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+.card:hover { border-color: rgba(201,168,76,0.28); }
+.card-gold { border-left: 3px solid var(--gold); }
+.card-teal { border-left: 3px solid var(--teal2); }
+.card-rust { border-left: 3px solid var(--rust); }
+.card-blue { border-left: 3px solid var(--blue); }
+.card-purple { border-left: 3px solid var(--purple); }
+.card-green { border-left: 3px solid var(--green); }
+
+/* Area pills */
+.area-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 2px;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.6rem; letter-spacing: 2px; text-transform: uppercase;
+}
+
+/* XP Bar */
+.xp-track { background: rgba(201,168,76,0.1); border-radius: 1px; height: 3px; }
+.xp-fill  {
+  height: 100%; border-radius: 1px;
+  background: linear-gradient(90deg, var(--gold), var(--gold2));
+  box-shadow: 0 0 8px rgba(201,168,76,0.5);
+  transition: width 1s cubic-bezier(.4,0,.2,1);
+}
+
+/* Mission tiles */
+.mission-tile {
+  background: #10131C;
+  border: 1px solid rgba(201,168,76,0.1);
+  border-radius: 4px;
+  padding: 20px 18px;
+  min-height: 180px;
+  position: relative;
+  transition: all 0.2s;
+}
+.mission-tile:hover { border-color: rgba(201,168,76,0.25); transform: translateY(-2px); }
+.mission-tile.boss { border-color: rgba(196,82,42,0.3); background: #130C08; }
+.mission-tile.done { border-color: rgba(46,125,82,0.3); background: #081310; }
+.mission-tile.locked { opacity: 0.35; }
+.boss-glow { box-shadow: 0 0 20px rgba(196,82,42,0.15); }
+
+/* Buttons */
 .stButton > button {
-    background: rgba(10,14,26,0.95) !important; color: #94a3b8 !important;
-    border: 1px solid rgba(99,179,237,0.18) !important; border-radius: 12px !important;
-    padding: 13px 18px !important; font-size: 0.9rem !important; font-family: 'Space Grotesk', sans-serif !important;
-    width: 100% !important; text-align: left !important; transition: all 0.2s ease !important;
+  background: transparent !important;
+  color: var(--mist) !important;
+  border: 1px solid rgba(201,168,76,0.2) !important;
+  border-radius: 2px !important;
+  font-family: 'DM Mono', monospace !important;
+  font-size: 0.72rem !important;
+  letter-spacing: 1.5px !important;
+  text-transform: uppercase !important;
+  padding: 10px 16px !important;
+  width: 100% !important;
+  transition: all 0.15s !important;
 }
 .stButton > button:hover {
-    background: rgba(99,179,237,0.07) !important; border-color: rgba(99,179,237,0.45) !important;
-    color: #e2e8f0 !important; transform: translateX(4px) !important;
-    box-shadow: -3px 0 0 0 rgba(99,179,237,0.35) !important;
+  background: rgba(201,168,76,0.08) !important;
+  color: var(--gold) !important;
+  border-color: var(--gold) !important;
 }
-.feedback-correct { background: rgba(104,211,145,0.07); border: 1px solid rgba(104,211,145,0.3); border-left: 3px solid #68d391; border-radius: 14px; padding: 20px; }
-.feedback-wrong   { background: rgba(252,129,129,0.07); border: 1px solid rgba(252,129,129,0.3); border-left: 3px solid #fc8181; border-radius: 14px; padding: 20px; }
-.stat-card { background: rgba(10,14,26,0.9); border: 1px solid rgba(99,179,237,0.1); border-radius: 14px; padding: 18px; text-align: center; }
-h1, h2, h3 { color: #e2e8f0 !important; }
-p, li { color: #94a3b8; }
-label { color: #94a3b8 !important; }
-hr { border-color: rgba(99,179,237,0.07) !important; }
-.stTextInput > div > div > input { background: rgba(10,14,26,0.9) !important; border: 1px solid rgba(99,179,237,0.2) !important; border-radius: 12px !important; color: #e2e8f0 !important; }
-.stTabs [data-baseweb="tab-list"] { background: rgba(10,14,26,0.8); border-radius: 12px; padding: 4px; border: 1px solid rgba(99,179,237,0.1); }
-.stTabs [data-baseweb="tab"] { color: #475569 !important; border-radius: 8px !important; }
-.stTabs [aria-selected="true"] { background: rgba(99,179,237,0.1) !important; color: #63b3ed !important; }
-@keyframes boss-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(252,129,129,0.15); } 50% { box-shadow: 0 0 0 6px rgba(252,129,129,0); } }
+
+/* Feedback */
+.fb-correct {
+  background: #081310; border: 1px solid rgba(46,125,82,0.35);
+  border-left: 3px solid var(--green);
+  border-radius: 4px; padding: 22px;
+}
+.fb-wrong {
+  background: #130C08; border: 1px solid rgba(196,82,42,0.35);
+  border-left: 3px solid var(--rust);
+  border-radius: 4px; padding: 22px;
+}
+
+/* Text */
+h1,h2,h3 { color: var(--paper) !important; font-family: 'DM Serif Display', serif !important; }
+p, div, span { color: var(--mist); }
+label { color: var(--mist) !important; }
+.stTextInput > div > div > input {
+  background: #10131C !important; color: var(--paper) !important;
+  border: 1px solid rgba(201,168,76,0.2) !important;
+  border-radius: 2px !important; font-family: 'Outfit' !important;
+}
+.stTabs [data-baseweb="tab-list"] {
+  background: #10131C; border-radius: 2px; padding: 3px;
+  border: 1px solid rgba(201,168,76,0.1);
+}
+.stTabs [data-baseweb="tab"] { color: var(--mist) !important; border-radius: 2px !important; }
+.stTabs [aria-selected="true"] { background: rgba(201,168,76,0.1) !important; color: var(--gold) !important; }
+hr { border-color: rgba(201,168,76,0.1) !important; }
+
+/* Decorative quote marks */
+.deco-num {
+  font-family: 'DM Serif Display', serif;
+  font-size: 5rem; color: rgba(201,168,76,0.08);
+  line-height: 1; position: absolute; top: -8px; right: 14px;
+  pointer-events: none;
+}
+
+@keyframes boss-flicker {
+  0%,100% { opacity: 1; }
+  50% { opacity: 0.85; }
+}
+.boss-flicker { animation: boss-flicker 2s ease-in-out infinite; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fadeUp 0.4s ease forwards; }
+
+/* Sidebar nav */
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-radius: 2px; cursor: pointer;
+  transition: all 0.15s; border: 1px solid transparent;
+  margin-bottom: 4px; color: var(--mist) !important;
+  font-family: 'DM Mono', monospace; font-size: 0.72rem;
+  letter-spacing: 1.5px; text-transform: uppercase;
+}
+.nav-item:hover { background: rgba(201,168,76,0.06); border-color: rgba(201,168,76,0.15); color: var(--gold) !important; }
+.nav-active { background: rgba(201,168,76,0.08) !important; border-color: rgba(201,168,76,0.25) !important; color: var(--gold) !important; }
+
+/* Leaderboard row */
+.lb-row {
+  display: flex; align-items: center; gap: 16px;
+  padding: 14px 18px;
+  background: #10131C; border: 1px solid rgba(201,168,76,0.08);
+  border-radius: 3px; margin-bottom: 6px;
+  transition: border-color 0.15s;
+}
+.lb-row:hover { border-color: rgba(201,168,76,0.2); }
+.lb-row.me { border-color: rgba(201,168,76,0.4); background: #141008; }
+
+/* Quiz option */
+.q-option {
+  background: #10131C; border: 1px solid rgba(201,168,76,0.12);
+  border-radius: 3px; padding: 14px 18px;
+  color: var(--mist) !important; font-size: 0.88rem;
+  cursor: pointer; transition: all 0.15s;
+  margin-bottom: 8px; line-height: 1.6;
+}
+.q-option:hover { border-color: var(--gold); color: var(--paper) !important; background: rgba(201,168,76,0.04); }
 </style>
 """, unsafe_allow_html=True)
 
-# ─── FULL COURSE MISSIONS ──────────────────────────────────────────────────────
+# ─── MISSIONS DATABASE ────────────────────────────────────────────────────────
 MISSIONS = {
 
-  # ══════════════════════════════════════════════════════════════
   "sistema": {
-    "nome": "🌐 Sistema Finanziario",
-    "badge": "badge-teal", "emoji": "🌐",
-    "xp_totale": 450,
-    "descrizione": "Funzioni, attori, saldi finanziari e strumenti",
-    "accent": "#5eead4",
+    "nome": "Sistema Finanziario", "emoji": "◈",
+    "colore": "gold", "accent": "#C9A84C",
+    "xp_totale": 600,
+    "desc": "Funzioni, saldi, strumenti, teorie dell'intermediazione",
     "livelli": [
       {
-        "titolo": "M1 — Ruolo e Funzioni del Sistema Finanziario",
-        "descrizione": "Trasferimento risorse, circuiti diretti e indiretti, aggregati monetari",
+        "id": "S1", "titolo": "Fondamenti del Sistema Finanziario",
+        "desc": "Ruolo, circuiti, saldi finanziari, aggregati monetari M1-M3",
         "xp": 60,
         "domande": [
           {
-            "domanda": "Il sistema finanziario trasferisce disponibilità finanziarie da soggetti in surplus a soggetti in deficit. Questo trasferimento può avvenire tramite:",
-            "opzioni": ["A) Solo circuito diretto (mercati) — le banche sono un'alternativa obsoleta", "B) Tre modalità: scambio diretto sui mercati, tramite intermediari che interpongono il bilancio, e tramite servizi di pagamento", "C) Solo tramite banche centrali che distribuiscono la moneta creata ex-novo", "D) Esclusivamente attraverso il sistema bancario, i mercati essendo riservati agli istituzionali"],
+            "testo": "Il sistema finanziario svolge tre funzioni fondamentali. La funzione di 'regolamento degli scambi' si realizza attraverso:",
+            "opzioni": ["A) L'emissione di titoli di Stato per finanziare la spesa pubblica",
+                        "B) L'offerta di strumenti di pagamento (moneta, bonifici, carte) che consentono di regolare transazioni tra operatori economici eliminando il baratto",
+                        "C) La supervisione bancaria esercitata dalla Banca d'Italia",
+                        "D) La quotazione delle società in borsa che regola il prezzo del capitale"],
             "corretta": 1,
-            "spiegazione": "Il sistema finanziario prevede: (1) circuito diretto — emittenti e investitori si incontrano sui mercati (es. IPO, emissioni BTP); (2) circuito indiretto — l'intermediario si interpone, raccoglie depositi e concede prestiti assumendo rischi in proprio; (3) sistema dei pagamenti — strumenti che regolano le transazioni (bonifici, carte). La coesistenza dei tre circuiti aumenta l'efficienza complessiva: i mercati per le grandi imprese, le banche per PMI e famiglie. Il sistema finanziario italiano è storicamente bank-based (le banche finanziano ~70% del credito alle imprese)."
+            "spiegazione": "Le TRE funzioni del sistema finanziario sono: (1) Trasferimento delle risorse — da unità in surplus a unità in deficit, nello spazio (tra settori) e nel tempo (intertemporal). (2) Regolamento degli scambi — strumenti di pagamento che sostituiscono il baratto: moneta legale, depositi in c/c, carte di debito/credito, bonifici SEPA, sistema TARGET2 per pagamenti interbancari. (3) Gestione dei rischi — strumenti assicurativi e derivati che consentono di trasferire e diversificare i rischi. In Italia il sistema dei pagamenti processa ogni anno ~€2.000 miliardi di transazioni. Il TIPS (TARGET Instant Payment Settlement) gestisce i pagamenti istantanei 24/7 tra le banche europee."
           },
           {
-            "domanda": "Il saldo finanziario di un settore istituzionale (SF = S – ΔAR) è positivo quando:",
-            "opzioni": ["A) Il settore ha più debiti che crediti verso il resto dell'economia", "B) Il risparmio (S) supera gli investimenti in attività reali (ΔAR): il settore è in surplus strutturale e finanzia gli altri", "C) Il PIL del settore cresce più velocemente della media nazionale", "D) Il settore ha un saldo positivo nella bilancia commerciale con l'estero"],
+            "testo": "Il 'circuito diretto' vs il 'circuito indiretto' di intermediazione finanziaria differiscono perché:",
+            "opzioni": ["A) Nel circuito diretto non ci sono costi di transazione, nel circuito indiretto sì",
+                        "B) Nel circuito diretto gli investitori acquistano strumenti emessi direttamente dagli emittenti (mercati); nel circuito indiretto un intermediario si INTERPONE — raccoglie fondi da chi ha surplus ed eroga credito a chi ha deficit, trasformando rischio, scadenza e importo",
+                        "C) Il circuito diretto funziona solo per le imprese, il circuito indiretto solo per le famiglie",
+                        "D) Il circuito diretto è regolato dalla BCE, il circuito indiretto dalla CONSOB"],
             "corretta": 1,
-            "spiegazione": "SF = S – ΔAR = ΔAF – ΔPF. Quando è positivo, il settore accumula attività finanziarie nette (presta al resto dell'economia). In Italia i settori istituzionali sono: Famiglie — storicamente in surplus (risparmiano più di quanto investono in immobili/beni durevoli); Società non finanziarie — tendenzialmente in deficit (investono più di quanto risparmiano → si finanziano); Pubblica Amministrazione — in deficit strutturale (spende più delle entrate fiscali → si indebita emettendo BTP); Settore estero — il suo saldo corrisponde al saldo delle partite correnti italiano con segno opposto."
+            "spiegazione": "CIRCUITO DIRETTO (mercati): l'impresa emette azioni o obbligazioni → gli investitori le acquistano → l'intermediario (banca/SIM) può svolgere solo una funzione di 'advisor' o 'underwriter' senza interporre il bilancio. Vantaggi: trasparenza dei prezzi, accesso diretto al risparmio, diversificazione per gli investitori. Limiti: richiede standardizzazione, informazioni pubbliche, investitori sofisticati. CIRCUITO INDIRETTO (intermediato): la banca raccoglie depositi dalle famiglie e concede prestiti alle imprese. Trasforma: scadenze (depositi a breve → prestiti a lungo), importi (piccoli depositi → grandi prestiti), rischio (assume e diversifica il rischio di credito). Questa funzione di 'qualitative asset transformation' giustifica l'esistenza delle banche secondo Diamond (1984). Il sistema italiano è storicamente bank-based: le banche finanziano ~65-70% del credito alle imprese non finanziarie."
           },
           {
-            "domanda": "L'aggregato monetario M1 include circolante + depositi a vista. M3 è più ampio e include anche pronti contro termine, obbligazioni ≤2 anni e fondi monetari. Perché la BCE monitora M3 piuttosto che solo M1?",
-            "opzioni": ["A) Perché M1 è controllato dalle banche commerciali mentre M3 è controllato dalla BCE", "B) Perché M3 cattura meglio la liquidità totale dell'economia inclusi gli strumenti che fungono da sostituti della moneta a breve — più rilevante per prevedere l'inflazione nel medio periodo", "C) Perché M1 non include i depositi delle imprese, rilevanti per le decisioni di investimento", "D) Perché M3 è l'unico aggregato che la BCE può controllare direttamente con le operazioni di mercato aperto"],
+            "testo": "SF = S − ΔAR = ΔAF − ΔPF. Se le Famiglie hanno S = €80 mld e ΔAR = €30 mld, le Società non finanziarie hanno S = €40 mld e ΔAR = €70 mld, la Pubblica Amministrazione ha deficit/PIL = 3% con PIL = €2.000 mld, qual è il saldo del settore estero (segno opposto alla posizione netta dell'Italia con l'estero)?",
+            "opzioni": ["A) Il settore estero ha saldo zero — la somma dei saldi settoriali è sempre zero",
+                        "B) SF Famiglie = +€50 mld; SF SNF = −€30 mld; SF PA = −€60 mld; SF Estero = +€40 mld (l'Italia prende in prestito €40 mld dall'estero, il saldo CA italiano è −€40 mld)",
+                        "C) Il settore estero non ha saldo finanziario — è un concetto applicabile solo ai settori residenti",
+                        "D) Il settore estero ha sempre saldo positivo perché l'Italia ha surplus commerciale"],
             "corretta": 1,
-            "spiegazione": "M1 = circolante + depositi a vista (liquidità immediata). M2 = M1 + depositi fino a 2 anni + depositi con preavviso ≤3 mesi. M3 = M2 + PCT passivi + obbligazioni ≤2 anni + quote fondi monetari. La BCE nella sua strategia monetaria usava M3 come 'primo pilastro' (dal 1999 al 2003 con target di crescita al 4.5%) perché è empiricamente correlato all'inflazione nel medio periodo. Il 'velocity problem' (V variabile) ha ridotto il ruolo degli aggregati come target operativi dopo il 2003, ma rimangono indicatori di riferimento. L'esplosione di M3 nel 2020-2021 (QE + depositi governativi) fu tra i segnali anticipatori dell'inflazione."
+            "spiegazione": "Calcolo: SF Famiglie = 80 − 30 = +€50 mld (surplus strutturale). SF SNF = 40 − 70 = −€30 mld (deficit strutturale: investono più di quanto risparmiano). SF PA = −3% × 2.000 = −€60 mld (deficit pubblico). Somma dei saldi interni = +50 − 30 − 60 = −€40 mld. Per identità contabile, la somma di TUTTI i saldi settoriali (incluso estero) = 0: SF Estero = +€40 mld. Questo significa che l'Italia si finanzia dall'estero per €40 mld (saldo delle partite correnti = −€40 mld): importa più capitali di quanti ne esporta. LA BILANCIA DEI PAGAMENTI: saldo CC + saldo finanziario = 0. Deficit CC → la nazione accumula debiti verso l'estero (NIIP negativa). L'Italia ha avuto NIIP peggiore del −25% del PIL prima della crisi del debito 2011-12; poi è migliorata grazie ai surplus di CA dal 2013."
           },
           {
-            "domanda": "Il 'transaction banking' differisce dal 'relationship banking' perché:",
-            "opzioni": ["A) Il transaction banking riguarda solo i pagamenti, il relationship banking solo i prestiti", "B) Nel transaction banking la banca valuta ogni operazione stand-alone (prezzo di mercato, asimmetrie info elevate); nel relationship banking investe nella relazione di lungo periodo con il cliente (info soft, pricing migliore)", "C) Il relationship banking è praticato solo dalle banche universali, il transaction dalle banche specializzate", "D) Non c'è differenza rilevante: entrambi si basano sulla valutazione del merito creditizio"],
+            "testo": "Gli aggregati monetari M1, M2, M3 della BCE. Un fondo comune monetario (FCM) che investe in BOT e commercial paper è incluso in:",
+            "opzioni": ["A) M1 — è un deposito a vista perché le quote sono rimborsabili immediatamente",
+                        "B) M3 — i FCM sono liquidità M3 per la loro alta liquidità e sostitutività con i depositi, ma non sono inclusi in M1 né M2",
+                        "C) Non è incluso in nessun aggregato monetario — è un prodotto di risparmio, non moneta",
+                        "D) M2 — per via della scadenza media inferiore a 2 anni dei titoli in portafoglio"],
             "corretta": 1,
-            "spiegazione": "Distinzione cruciale nel credito alle imprese: Transaction banking — ogni operazione è valutata autonomamente, basandosi su hard information (bilanci, rating), tipico dei mercati anglosassoni e delle grandi banche universali. Relationship banking — la banca costruisce una relazione duratura con il cliente, acquisisce soft information (affidabilità del management, prospettive settoriali) che riduce le asimmetrie informative, offre credito anche in momenti difficili (relationship rent). Vantaggi del relationship: riduzione adverse selection, accesso a credito per PMI. Limiti: hold-up problem (la banca monopolizza l'informazione e può estrarre rendite), concentrazione del rischio. Le PMI italiane dipendono enormemente dal relationship banking."
+            "spiegazione": "CLASSIFICAZIONE AGGREGATI: M1 = Circolante + Depositi a vista (liquidità immediata, usati come mezzo di pagamento). M2 = M1 + Depositi fino a 2 anni + Depositi con preavviso ≤3 mesi (liquidità differita ma alta). M3 = M2 + Pronti Contro Termine + Obbligazioni bancarie ≤2 anni + Quote Fondi Monetari (sostituti quasi-monetari). I FCM (Fondi Comuni Monetari) rientrano in M3 perché: (1) le quote sono liquidabili con brevissimo preavviso, (2) il valore è stabile (NAV ~ €1), (3) sono percepiti dagli investitori come quasi-equivalenti ai depositi. POLITICA MONETARIA BCE: target operativo = tasso di interesse sui depositi overnight (DFR). M3 è un 'indicatore' non un target — l'esperienza degli anni 2000-2010 ha mostrato che la velocità della moneta (V nella MV=PY) è troppo instabile per usare M3 come target operativo."
           }
         ]
       },
       {
-        "titolo": "M2 — Teorie dell'Intermediazione",
-        "descrizione": "Costi di transazione, asimmetrie informative, adverse selection e moral hazard",
+        "id": "S2", "titolo": "Teorie dell'Intermediazione",
+        "desc": "Costi di transazione, asimmetrie info, Akerlof, Diamond, adverse selection",
+        "xp": 100,
+        "domande": [
+          {
+            "testo": "Il modello di Diamond (1984) 'Financial Intermediation and Delegated Monitoring' dimostra che le banche esistono come 'delegated monitors'. Qual è l'intuizione centrale?",
+            "opzioni": ["A) Le banche esistono perché i mercati non riescono a prezzare correttamente il rischio di credito",
+                        "B) Invece di avere N risparmiatori che monitorano ciascuno il proprio debitore (costo N×m), è più efficiente delegare il monitoraggio a un intermediario (costo m) che diversifica il proprio rischio di fallimento su molti debitori — economie di scala nel monitoraggio",
+                        "C) Le banche esistono perché lo Stato impone l'intermediazione obbligatoria per ragioni fiscali",
+                        "D) Le banche riducono il rischio di mercato aggregando strumenti diversi in portafogli diversificati"],
+            "corretta": 1,
+            "spiegazione": "Diamond (1984) — il modello fondativo della teoria bancaria moderna: Con N imprenditori e M risparmiatori: se ogni risparmiatore monitora ogni imprenditore → costo totale = N×M×m (enorme). Se i risparmiatori delegano a un intermediario (banca): banca monitora gli N imprenditori, costo = N×m. Il risparmio è (N×M×m − N×m) = N×m×(M−1). MA: la banca deve essere incentivata a monitorare onestamente. Diamond risolve con la diversificazione: se la banca presta a molti debitori indipendenti, la sua distribuzione delle perdite converge alla media (LGN) → pagherà quasi sempre i depositanti → il contratto di debito è ottimale. La banca si 'automonitorizza' attraverso la minaccia del fallimento. IMPLICAZIONE NORMATIVA: la diversificazione bancaria non è solo prudenziale, è condizione necessaria per l'esistenza stessa delle banche come delegated monitors. Concentrazione = rischio di fallimento della funzione informativa."
+          },
+          {
+            "testo": "Lo 'hold-up problem' nel relationship banking si verifica quando:",
+            "opzioni": ["A) Il cliente non vuole rivelare informazioni riservate all'analista del credito",
+                        "B) La banca, avendo accumulato informazioni private sul cliente nel corso del rapporto, acquista potere monopolistico e può estrarre rendite rifinanziando a condizioni peggiori — il cliente è 'prigioniero' perché cambiare banca significa perdere il valore informatico accumulato",
+                        "C) Il debitore blocca i fondi ricevuti su un conto vincolato invece di investirli",
+                        "D) La banca rifiuta di concedere credito in attesa che il cliente fornisca più garanzie collaterali"],
+            "corretta": 1,
+            "spiegazione": "L'HOLD-UP PROBLEM è la principale critica al relationship banking: la banca costruisce soft information esclusiva (reputazione, flussi di cassa reali, prospettive del settore). Questa informazione è privata e non trasferibile a un'altra banca → il cliente diventa informativamente 'locked-in'. La banca sfrutterà questa posizione nelle rinegoziazioni: al rinnovo del prestito può imporre condizioni peggiori sapendo che il cliente non può facilmente andare altrove. EVIDENZE EMPIRICHE: le PMI italiane con banca unica (monobanca) pagano spread 20-50bps più alti delle PMI con più banche concorrenti per lo stesso merito creditizio. SOLUZIONE: multibanking (avere più banche) riduce l'hold-up ma aumenta il free-riding nel monitoraggio (nessuna banca vuole investire in informazioni che beneficerebbero anche le altre). Bilanciamento ottimale: 'main bank' + 1-2 banche secondarie (il modello Hausbank tedesco)."
+          },
+          {
+            "testo": "La teoria della 'segnalazione' (Spence, 1973) applicata al credito: perché un debitore di qualità alta potrebbe preferire offrire una garanzia collaterale piuttosto che accettare un tasso di interesse più basso senza garanzia?",
+            "opzioni": ["A) Perché la garanzia riduce il tasso di interesse e il debitore risparmia sugli interessi",
+                        "B) Perché il collaterale è un segnale credibile della qualità del debitore: solo i debitori di qualità alta (con bassa probabilità di default) trovano conveniente impegnare collaterale — per i debitori rischiosi il costo atteso della perdita del collaterale (PD alta × valore garanzia) supera il beneficio del tasso più basso",
+                        "C) Perché la normativa bancaria impone garanzie collaterali per tutti i prestiti superiori a €50.000",
+                        "D) Perché il collaterale elimina completamente il rischio di credito — è una forma di assicurazione totale"],
+            "corretta": 1,
+            "spiegazione": "SEGNALAZIONE (Spence) nel credito: il collaterale risolve l'adverse selection come segnale auto-selettivo. Consideriamo due tipi di debitori: Debitore 'buono' (PD=2%): probabilità di perdere il collaterale = 2% → costo atteso = 2% × valore garanzia (basso). Debitore 'cattivo' (PD=20%): probabilità di perdere il collaterale = 20% → costo atteso = 20% × valore garanzia (alto). Il debitore buono preferisce offrire collaterale per ottenere il tasso migliore (costo basso della garanzia + tasso basso). Il debitore cattivo non trova conveniente il menu 'collaterale + tasso basso' (costo alto della garanzia). EQUILIBRIO SEPARANTE: la banca offre due contratti — (1) tasso alto, no collaterale per i cattivi; (2) tasso basso, collaterale per i buoni. I tipi si auto-selezionano. Limite: per funzionare il collaterale deve essere costoso per i debitori rischiosi e quasi gratuito per i buoni → richiede garanzie reali (immobili) non personali."
+          }
+        ]
+      },
+      {
+        "id": "S3", "titolo": "◈ BOSS — Strumenti Finanziari & Pricing",
+        "desc": "⚔ Equity, debt, derivati, IFRS9, rating, duration, convexity",
+        "xp": 180, "boss": True,
+        "domande": [
+          {
+            "testo": "La 'duration modificata' di un BTP decennale cedola 4%, yield 5%, è circa 7.8 anni. Se i tassi salgono di 50bps, la variazione percentuale del prezzo è approssimativamente:",
+            "opzioni": ["A) −3.9% → ΔP/P ≈ −DM × Δy = −7.8 × 0.005",
+                        "B) −3.9% — calcolato come Duration × Δy = 7.8 × 0.5 = 3.9%",
+                        "C) +3.9% — i prezzi salgono quando i tassi aumentano",
+                        "D) −7.8% — la duration stessa misura la variazione percentuale del prezzo"],
+            "corretta": 0,
+            "spiegazione": "Duration Modificata: DM = Duration Macaulay / (1+y). Approssimazione lineare: ΔP/P ≈ −DM × Δy = −7.8 × 0.005 = −0.039 = −3.9%. ATTENZIONE: l'approssimazione è lineare — sopravvaluta la perdita perché ignora la CONVESSITÀ. La variazione reale è: ΔP/P ≈ −DM×Δy + ½×Convexity×Δy². La convexity positiva significa che il prezzo scende MENO di quanto previsto dalla duration per rialzi di tasso e sale PIÙ per ribassi. ESEMPIO PRATICO: BTP 10Y con DM=7.8: se i tassi salgono di 100bps, stima lineare = −7.8%, stima con convexity ≈ −7.4% (la convexity 'ammortizza' la perdita). Perché importa: le banche con portafogli di titoli classificati FVOCI o FVTPL vedono impatto diretto sul patrimonio/CE per variazioni di tasso — il rischio IRRBB (Interest Rate Risk Banking Book) è monitorato dalla BCE nel processo SREP. La crisi di SVB (2023) è stata causata proprio dall'ignorare la duration risk su portafogli HtM."
+          },
+          {
+            "testo": "Un'obbligazione 'convertibile' (convertible bond) è classificata da IAS 32 come strumento finanziario composto. Perché impatta diversamente il bilancio rispetto a un'obbligazione straight?",
+            "opzioni": ["A) Perché è più rischiosa e richiede maggiori accantonamenti ECL",
+                        "B) IAS 32 richiede la separazione della componente debito (VA dei flussi certi, iscritto al passivo) e della componente equity (opzione di conversione, iscritta nel patrimonio netto) — il trattamento 'split accounting' riduce il valore contabile del debito e aumenta il patrimonio netto",
+                        "C) Perché le obbligazioni convertibili sono sempre classificate FVTPL secondo IFRS 9",
+                        "D) Non impatta diversamente — le convertibili sono trattate come normali obbligazioni fino alla conversione effettiva"],
+            "corretta": 1,
+            "spiegazione": "IAS 32 SPLIT ACCOUNTING per gli strumenti composti: identificazione delle componenti — la convertible ha una componente debito (i flussi fissi di cedola e rimborso) e una componente equity (il diritto di convertire in azioni = opzione call sull'equity emittente). Valorizzazione: Valore componente debito = VA dei flussi futuri attualizzati al tasso di mercato per un bond non convertibile equivalente. Valore componente equity = Totale emissione − Valore debito (residuo). ESEMPIO: emissione convertibile €100M, cedola 2%, mercato 5%, maturità 5 anni → VA debito = ~87M → equity component = 13M. Implicazione: l'emittente iscrive €87M a passivo (debito) e €13M a patrimonio netto. Gli interessi sono calcolati sull'87M al tasso effettivo 5%, non al 2% nominale → costo finanziario effettivo più alto di quanto appare dal coupon. Questo incentiva le imprese a usare le convertibili: basso coupon in cambio di diluzione potenziale futura — tipico delle startup growth (Tesla 2020 aveva convertibili a 0% cedola)."
+          },
+          {
+            "testo": "I Credit Default Swap (CDS) sull'Italia a 5 anni quotano 150bps. Cosa significa e come si usano per misurare il rischio?",
+            "opzioni": ["A) Il tasso di rendimento dei BTP italiani a 5 anni è 1.50% sopra l'Euribor",
+                        "B) Il protection buyer paga 150bps annui per essere risarcito in caso di credit event (default/ristrutturazione) sull'Italia — il CDS spread è il 'prezzo del rischio' di default percepito dal mercato",
+                        "C) I CDS a 150bps indicano che l'Italia ha una probabilità di default del 15% nei prossimi 5 anni",
+                        "D) Le agenzie di rating hanno assegnato un rating equivalente a 150bps di spread creditizio"],
+            "corretta": 1,
+            "spiegazione": "CDS (Credit Default Swap) — struttura: il protection buyer paga il CDS spread (150bps = 1.5%/anno) sul nozionale al protection seller. In caso di credit event (default, ristrutturazione, moratoria), il seller paga la perdita al buyer (par − recovery). Relazione con PD implicita: CDS spread ≈ PD × LGD. Ipotizzando LGD = 40%: PD implicita = 150bps / 40% = 3.75%/anno. PD cumulata 5 anni ≈ 1 − (1−3.75%)^5 ≈ 17.4%. STORIA: spread CDS Italia ha toccato 550bps nel novembre 2011 (crisi Berlusconi/spread BTP) → PD implicita ~14%/anno. Dopo Draghi 'whatever it takes' → crollo a <100bps. USO: (1) Copertura del rischio sovrano per le banche con grandi portafogli BTP; (2) Speculazione direzionale sul rischio paese; (3) Regolamentazione — i CDS sono diventati famigerati con i naked CDS su debito sovrano greco (vietati nell'UE dal 2012 per i naked positions)."
+          }
+        ]
+      }
+    ]
+  },
+
+  "banche": {
+    "nome": "Banche & Bilancio", "emoji": "▣",
+    "colore": "blue", "accent": "#2C5F8A",
+    "xp_totale": 650,
+    "desc": "Raccolta, impieghi, bilancio IAS/IFRS, equilibri gestionali, NPL",
+    "livelli": [
+      {
+        "id": "B1", "titolo": "Raccolta Bancaria e Passivo",
+        "desc": "Depositi, PCT, obbligazioni, MREL, raccolta wholesale vs retail",
         "xp": 80,
         "domande": [
           {
-            "domanda": "George Akerlof nel celebre articolo 'The Market for Lemons' (1970) dimostrò che le asimmetrie informative possono portare al collasso di un mercato. Quale meccanismo spiega la 'selezione avversa' nel credito bancario?",
-            "opzioni": ["A) Le banche selezionano i peggiori clienti per applicare tassi più alti e massimizzare i profitti", "B) Quando la banca non distingue i buoni dai cattivi debitori, alza i tassi per coprire il rischio medio → i buoni debitori escono dal mercato → restano solo i cattivi → il credito collassa (adverse selection)", "C) I debitori selezionano le banche con i tassi più bassi, creando una corsa al ribasso dei margini", "D) Le garanzie collaterali peggiorano la qualità del portafoglio selezionando debitori privi di attività reali"],
-            "corretta": 1,
-            "spiegazione": "Akerlof (Premio Nobel 2001 con Spence e Stiglitz): nel mercato delle auto usate, chi vende sa la qualità dell'auto (info privata), chi compra no. Il venditore di auto buona non ottiene il prezzo giusto → esce dal mercato. Rimangono solo le 'lemons' (auto pessime). Nel credito: la banca non distingue debitori ad alto/basso rischio. Se alza il tasso: i debitori sicuri (con NPV di progetto basso) smettono di chiedere credito, i debitori rischiosi (con NPV alto solo per effetto della leva) continuano. Risultato: il portafoglio si deteriora. SOLUZIONE: screening (raccolta informazioni), segnalazione (il debitore offre garanzie che solo i buoni possono permettersi), relationship banking."
+            "testo": "Il MREL (Minimum Requirement for own funds and Eligible Liabilities) è il requisito minimo di passività bail-inable introdotto dalla BRRD. Una banca con Total Assets €100 mld e RWA €60 mld deve mantenere MREL = 8% del TREA (Total Risk Exposure Amount). Quante passività eligible deve avere?",
+            "opzioni": ["A) €8 mld — 8% degli attivi totali di €100 mld",
+                        "B) €4.8 mld — 8% degli RWA di €60 mld",
+                        "C) €8 mld include: CET1 + AT1 + T2 + Senior Non-Preferred eligible; il MREL si calcola su TREA che in questo caso è RWA = €60 mld → MREL = 8% × 60 = €4.8 mld ma in pratica il requisito è spesso più alto includendo buffer",
+                        "D) Il MREL non si applica alle banche non-G-SIB"],
+            "corretta": 2,
+            "spiegazione": "MREL (Bank Recovery and Resolution Directive): obiettivo è garantire che la banca abbia abbastanza passività subordinate da poter assorbire perdite e ricapitalizzarsi senza fondi pubblici in caso di risoluzione. CALCOLO: MREL = % × TREA (Total Risk Exposure Amount = RWA + requisiti operativi). La struttura del passivo bail-inable (dall'alto verso il basso nella gerarchia delle perdite): CET1 capitale ordinario → AT1 (Tier 1 aggiuntivo, es. CoCo bonds) → T2 (subordinate classiche) → Senior Non-Preferred (SNP — strumento introdotto dal 2019, senior ma subordinato alle preferred) → Senior Preferred (obbligazioni ordinarie) → Depositi >100K grandi imprese. TLAC vs MREL: TLAC (Total Loss Absorbing Capacity) è il requisito FSB per le G-SIB globali (UniCredit, BNP, Deutsche) → più stringente (~18-20% RWA). MREL è il framework europeo per tutte le banche soggette a risoluzione. La distinzione Senior Preferred / Non-Preferred è italiana dal D.Lgs. 23/2018 che ha creato la nuova categoria SNP."
           },
           {
-            "domanda": "Il 'moral hazard' nel credito bancario si verifica DOPO la concessione del prestito. Un esempio pratico è:",
-            "opzioni": ["A) Il debitore presenta documenti falsi per ottenere il prestito — è fraud, non moral hazard", "B) Una PMI ottiene un prestito per acquistare macchinari (progetto sicuro) ma poi usa i fondi per speculazione finanziaria (progetto rischioso) — sa che in caso di successo guadagna, in caso di fallimento perde poco (già sull'orlo dell'insolvenza)", "C) La banca concede il prestito senza istruttoria adeguata — è moral hazard della banca, non del debitore", "D) Il debitore rimborsa anticipatamente il prestito appena trova condizioni migliori altrove"],
+            "testo": "Un'operazione di TLTRO III (Targeted Longer-Term Refinancing Operation) ha concesso alla banca fondi a tasso negativo (−0.5% nella fase incentivata 2020-21) condizionati alla crescita dei prestiti. Quale effetto ha sul NIM bancario e perché la BCE l'ha strutturata così?",
+            "opzioni": ["A) Il TLTRO aumenta il NIM perché la banca riceve fondi a tasso negativo e li presta a tassi positivi — pura carry trade",
+                        "B) Il TLTRO comprime il NIM: il beneficio del tasso negativo sulla raccolta riduce il costo del funding, ma la BCE ha strutturato il meccanismo condizionato per evitare che la banca usasse i fondi per carry trade sui BTP invece di prestarli a famiglie e imprese",
+                        "C) Il TLTRO non impatta il NIM — è un'operazione fuori bilancio della banca centrale",
+                        "D) Il TLTRO aumenta i requisiti patrimoniali perché i fondi BCE hanno peso del rischio del 100%"],
             "corretta": 1,
-            "spiegazione": "Moral hazard (azzardo morale) — problema post-contrattuale: dopo aver ottenuto il finanziamento, il debitore ha incentivo a comportarsi in modo più rischioso di quanto dichiarato (hidden action). Meccanismo: se il progetto rischioso va bene → il debitore guadagna molto. Se va male → perde solo il patrimonio già impegnato, il costo ricade principalmente sulla banca (limited liability). È la radice del problema principale-agente nel credito. SOLUZIONI: covenant (clausole che limitano il comportamento del debitore), monitoraggio continuo, collateral (skin in the game), incentivi equity-like. Nel banking: i sistemi di remunerazione dei manager bancari basati su bonus a breve incentivarono il moral hazard pre-2008."
+            "spiegazione": "TLTRO III (2019-2021-2024): operazioni di rifinanziamento a lungo termine (4 anni) con tasso agevolato (fino a −1% nella fase COVID-incentivata per le banche che aumentavano i prestiti). MECCANISMO INCENTIVO: tasso base = DFR (−0.5%). Se la banca aumenta i prestiti netti sopra una soglia → tasso scende ulteriormente. Se non raggiunge target → tasso sale al DFR. EFFETTI CONTABILI: i TLTRO a tasso negativo generano un 'TLTRO benefit' — la BCE paga la banca per prendere in prestito. IFRS: questo beneficio è rilevato come commissione differita (a CE) lungo la vita del TLTRO. Problema 2022-2023: quando il DFR è salito sopra zero, il TLTRO è diventato costoso rispetto al mercato → le banche lo hanno rimborsato anticipatamente (prevista clausola di rimborso) per €477 miliardi nel febbraio 2023. Questo ha drenato liquidità dal sistema e amplificato la trasmissione monetaria restrittiva BCE."
           },
           {
-            "domanda": "I costi di transazione che giustificano l'esistenza degli intermediari finanziari includono i 'verification costs'. A cosa si riferiscono?",
-            "opzioni": ["A) I costi legali per verificare l'identità del cliente nell'ambito della normativa AML", "B) I costi per valutare la qualità del progetto di investimento del prenditore di fondi PRIMA (screening) e il rispetto degli impegni DOPO (monitoring) la concessione del credito", "C) I costi di verifica dei documenti contabili richiesti dalla vigilanza bancaria (Banca d'Italia)", "D) I costi di audit dei bilanci aziendali richiesti dalla CONSOB per le società quotate"],
+            "testo": "Il 'core tier 1 deposit franchise' è considerato la fonte di raccolta più pregiata per una banca retail. Perché i depositi a vista retail hanno un 'beta' di deposito basso anche con tassi BCE al 4%?",
+            "opzioni": ["A) Perché la normativa limita il tasso massimo sui depositi al 2%",
+                        "B) Perché i depositi retail mostrano alta 'stickiness' — i clienti non cambiano banca per differenziali di tasso ridotti (costi di switching, inerzia comportamentale, relazioni di fiducia) → la banca può mantenere bassi tassi sui depositi anche con tassi di mercato alti, intascando lo spread",
+                        "C) Perché il FITD garantisce i depositi fino a €100K eliminando il rischio di bank run",
+                        "D) Perché i depositi a vista non producono interessi per definizione contrattuale"],
             "corretta": 1,
-            "spiegazione": "I costi di transazione nel credito si articolano in: (1) Search costs — trovare la controparte con posizione opposta; (2) Verification costs — valutare la qualità del progetto prima (screening) e controllare il comportamento dopo (monitoring/enforcement); (3) Incentive costs — strutturare il contratto per allineare incentivi. Gli intermediari riducono questi costi sfruttando: economie di scala (analizzano migliaia di posizioni → costo unitario basso), specializzazione (analisti creditizi esperti), economie di scope (informazioni raccolte per un servizio utili per altri), effetto reputazione (il cliente teme il danno reputazionale di un default). La teoria dei 'delegated monitors' (Diamond, 1984): i risparmiatori delegano alla banca il monitoraggio dei debitori, risparmiando sui costi."
+            "spiegazione": "DEPOSIT BETA = variazione del tasso sui depositi / variazione del tasso di policy BCE. Beta basso (es. 0.2): se BCE alza di 100bps, i depositi retail aumentano solo di 20bps. Beta alto (es. 0.8): tipico dei depositi corporate large-cap che hanno accesso diretto ai mercati monetari. STICKINESS DEI DEPOSITI RETAIL: (1) Switching costs elevati — cambio domiciliazione stipendio, addebiti automatici (utility, rata mutuo) → costo reale e psicologico del cambio. (2) Inerzia comportamentale (status quo bias — Thaler). (3) Relazione di lungo periodo e fiducia — difficile monetizzare in uno spread marginale. (4) Limiti cognitivi — molti clienti non confrontano attivamente i rendimenti. IMPLICAZIONE: nel 2022-2023 le banche italiane hanno alzato i tassi retail molto meno del tasso BCE → la franchising value dei depositi (il valore del deposit franchise) si è ampliata enormemente. Intesa stima il valore del proprio deposit franchise in decine di miliardi di euro nel calcolo del fair value del portafoglio bancario."
           }
         ]
       },
       {
-        "titolo": "M3 — BOSS: Strumenti Finanziari e Rating",
-        "descrizione": "⚔️ BOSS — Equity, debt, derivati, classificazione IFRS9, rating e pricing",
-        "xp": 150, "boss": True,
+        "id": "B2", "titolo": "Credito: Processo, NPL e Pricing",
+        "desc": "Istruttoria, PD/LGD/EAD, forbearance, NPL lifecycle, covenant, Centrale Rischi",
+        "xp": 120,
         "domande": [
           {
-            "domanda": "Un'obbligazione 'zero coupon' BTP Italia ha valore nominale €10.000, scadenza 5 anni, prezzo di emissione €8.100. Qual è il rendimento annuo (approssimato)?",
-            "opzioni": ["A) 19% — calcolato come (10.000-8.100)/8.100", "B) Circa 4.3% — calcolato come (10.000/8.100)^(1/5) - 1, il tasso che capitalizza 8.100 a 10.000 in 5 anni", "C) 2% — calcolato come sconto totale/anni: (10.000-8.100)/(5×10.000)", "D) Non calcolabile senza conoscere l'inflazione attesa per i BTP indicizzati"],
+            "testo": "Un'impresa ottiene un finanziamento con covenant 'Debt/EBITDA ≤ 3.5×'. Al momento della concessione EBITDA = €10M, debito totale = €30M (ratio 3.0×). L'anno successivo l'EBITDA scende a €8M (debito invariato). Quali conseguenze scattano?",
+            "opzioni": ["A) Il prestito viene automaticamente riclassificato a sofferenza e segnalato in Centrale dei Rischi",
+                        "B) Il covenant è violato (30/8 = 3.75× > 3.5×): la banca può dichiarare 'event of default' e accelerare il rimborso, oppure concedere un 'waiver' (rinuncia temporanea) rinegoziando le condizioni — tipicamente spread più alto, nuove garanzie, piano di riduzione del debito",
+                        "C) La banca deve immediatamente accantonare il 100% del prestito come perdita attesa",
+                        "D) Il covenant vincola solo la distribuzione dei dividendi, non il rimborso del prestito"],
             "corretta": 1,
-            "spiegazione": "Per gli zero coupon: Rendimento = (VN/Prezzo)^(1/n) - 1 = (10.000/8.100)^(1/5) - 1 = 1.2346^0.2 - 1 ≈ 4.3%. Non ci sono cedole: il rendimento deriva interamente dal capital gain (acquisto sotto la pari, rimborso alla pari). La relazione prezzo-rendimento è inversa: se i tassi di mercato salgono → il valore attuale dei flussi futuri scende → il prezzo scende. Gli zero coupon hanno duration = maturity (nessuna cedola intermedia): sono i più sensibili alle variazioni di tasso. I BOT (3/6/12 mesi) e i CTZ (24 mesi) sono esempi di zero coupon governativi italiani."
+            "spiegazione": "COVENANT BREACH: Debt/EBITDA = 30/8 = 3.75× > threshold 3.5× → violazione tecnica. CONSEGUENZE TIPICHE nei contratti di credito: (1) Notification: l'impresa deve notificare immediatamente la banca. (2) Cross-default: se il covenant è in più linee di credito, la violazione in uno può triggerare il default anche negli altri. (3) Options della banca: a) Waiver — rinuncia formale per un periodo definito: la banca accetta la violazione in cambio di spread aumentato (+50-150bps tipicamente), nuove garanzie, piano di riduzione del debito entro 12-18 mesi; b) Acceleration — rimborso immediato del prestito; c) Rinegoziazione strutturale — modifica definitiva del covenant o del piano di ammortamento. IL WAIVER NON È FORBEARANCE automaticamente (secondo EBA): solo se l'impresa è in difficoltà finanziaria e il waiver è una concessione che non avverrebbe in condizioni normali → si applica la classificazione forbearance con tutte le implicazioni IFRS 9."
           },
           {
-            "domanda": "Moody's abbassa il rating di un'obbligazione corporate da Baa3 a Ba1. Quali sono le conseguenze per l'emittente e per gli investitori istituzionali?",
-            "opzioni": ["A) Nessuna conseguenza diretta — il rating è solo un'opinione consultiva senza effetti normativi", "B) L'obbligazione diventa 'high yield' (sub-investment grade): molti fondi pensione e assicurazioni sono vietati per regolamento dal detenerla → vendita forzata, spread aumenta, costo del debito sale per l'emittente", "C) L'emittente deve rimborsare immediatamente il debito come previsto dalle covenant di accelerazione", "D) La BCE smette di accettare il titolo come collaterale nelle operazioni di rifinanziamento"],
+            "testo": "La 'Centrale dei Rischi' (CR) della Banca d'Italia è un sistema informativo cruciale per la valutazione del merito creditizio. Una PMI con segnalazioni 'a incaglio' in CR: quali conseguenze ha per l'accesso al credito?",
+            "opzioni": ["A) Nessuna conseguenza — le informazioni in CR sono confidenziali e non accessibili alle banche",
+                        "B) Le banche (tutte le banche segnalanti) possono consultare la CR e vedere la storia creditizia della PMI: segnalazioni di incaglio/sofferenza portano tipicamente a rifiuto automatico del credito o condizioni molto peggiorate, anche se la banca consultante non ha rapporti diretti con quella PMI",
+                        "C) Solo la banca che ha segnalato l'incaglio può consultare le informazioni — le altre banche non hanno accesso",
+                        "D) Le segnalazioni negative in CR vengono cancellate dopo 6 mesi se il debitore regolarizza la posizione"],
             "corretta": 1,
-            "spiegazione": "Il 'fallen angel' effect: Baa3 (Moody's) / BBB- (S&P) è la soglia investment grade / high yield. Scendere sotto questa soglia innesca: (1) Forced selling — i fondi pensione, assicurazioni e fondi 'investment grade only' devono vendere per mandato → eccesso di offerta → prezzo crolla → spread si amplia. (2) Cliff effect normativo — Basilea III assegna pesi di rischio molto più alti per gli HY, aumentando il capital charge per le banche. (3) Costo del debito sale — future emissioni dovranno offrire spread molto più elevati. (4) Covenant trigger — molti contratti di prestito hanno clausole che scattano in caso di downgrade (margin calls, accelerazione). Esempi drammatici: downgrade di GE nel 2018, Telecom Italia nel 2018."
+            "spiegazione": "CENTRALE DEI RISCHI (CR) Banca d'Italia — sistema di centralizzazione delle informazioni sui rischi di credito: obbligatoria per tutte le banche e intermediari ex art. 106 TUB per esposizioni ≥ €30.000. Dati segnalati: importi utilizzati, accordati, garanzie, classificazione (in bonis / scaduto / inadempienza probabile / sofferenza). ACCESSO: ogni intermediario segnalante può consultare la posizione globale di un soggetto → visione aggregata di tutti i debiti nel sistema. EFFETTI NEGATIVI: una segnalazione a 'sofferenza' presso anche solo una banca → tutte le banche vedono il rischio → effetto moltiplicativo sul razionamento del credito. TIMING: le segnalazioni rimangono visibili anche dopo la regolarizzazione (segnale negativo residuo). GARANZIE: il debitore ha diritto di consultare la propria posizione CR e può contestare errori. ATTENZIONE: la CR è diversa dai 'SIC' (Sistemi di Informazione Creditizia privati come CRIF) che operano su soglie più basse (anche piccoli prestiti personali)."
           },
           {
-            "domanda": "La classificazione IFRS 9 degli strumenti finanziari si basa su due criteri. Quali?",
-            "opzioni": ["A) Valore di mercato e intenzione del management di vendere o tenere fino a scadenza", "B) Business model (per cosa è detenuto lo strumento) e test SPPI (Solely Payments of Principal and Interest): superarli determina se la classificazione è AC, FVOCI o FVTPL", "C) Liquidità dello strumento e merito creditizio dell'emittente", "D) Scadenza residua (breve vs lungo termine) e valuta di denominazione"],
+            "testo": "IFRS 9 — modello ECL a 3 stage. Una PMI finanziaria classificata in Stage 1 viene messa in Stage 2 per 'significativo aumento del rischio di credito'. Quali sono le conseguenze contabili immediate?",
+            "opzioni": ["A) Il credito viene svalutato al 50% e classificato come sofferenza nel bilancio",
+                        "B) L'accantonamento ECL passa da perdita attesa a 12 mesi (Stage 1) a perdita attesa lifetime (tutta la vita residua del credito) — tipicamente un salto 3-5× nell'importo dell'accantonamento; il cambio impatta direttamente il conto economico (rettifica di valore)",
+                        "C) Il credito deve essere ceduto al mercato NPL entro 90 giorni",
+                        "D) Stage 2 non ha effetti contabili — è solo un segnale di allerta interno"],
             "corretta": 1,
-            "spiegazione": "IFRS 9 (2018) ha rivoluzionato la classificazione: (1) Business model test: 'Hold to collect' → Amortised Cost (AC); 'Hold to collect and sell' → FVOCI; 'Other' → FVTPL. (2) SPPI test: i flussi di cassa sono 'solo pagamenti di capitale e interessi'? Se no → FVTPL obbligatorio. AC: iscritto al costo ammortizzato, impairment ECL. FVOCI: fair value, variazioni in OCI (patrimonio netto), impairment ECL rilevato a CE. FVTPL: fair value, variazioni a CE. Implicazione bancaria: le banche con portafogli HtM (AC) non rilevano perdite contabili su rialzo tassi — ma se devono vendere (come SVB nel 2023) le perdite diventano reali e il CET1 crolla."
+            "spiegazione": "IFRS 9 — Stage migration: Stage 1 → Stage 2 è la transizione più impattante. STAGE 1: ECL = PD(12m) × LGD × EAD. Esempio: PD 12m = 1%, LGD = 40%, EAD = €1M → ECL = €4.000. STAGE 2: ECL = PD(lifetime) × LGD × EAD. Se PD lifetime (5 anni) = 8% → ECL = 8% × 40% × 1M = €32.000. L'accantonamento aumenta di 8× in questo esempio → impatto significativo a CE (rettifica netta). TRIGGER per Stage 2: rating interno deteriora di 2+ notch, scaduto >30 giorni (ma reversibile), inclusione in watch-list, covenant in breach, settore in stress (forward-looking). CLIFF EFFECT: il 'salto' da Stage 1 a Stage 2 crea discontinuità — piccoli deterioramenti del merito creditizio hanno impatti contabili sproporzionati. Questo ha generato critiche: le banche hanno incentivo a mantenere artificialmente i debitori in Stage 1 per evitare l'impatto a CE (regulatory capital optimization vs accounting accuracy). Le autorità hanno rafforzato i trigger automatici."
+          },
+          {
+            "testo": "Una banca vuole cedere un portafoglio NPL lordi per €500M con coverage ratio 45% (accantonamenti €225M) a un servicer specializzato (es. doValue, Prelios) al prezzo di €140M. Come impatta il bilancio?",
+            "opzioni": ["A) Plusvalenza di €140M meno il valore lordo €500M = perdita €360M",
+                        "B) Al momento della cessione: valore netto contabile = €500M − €225M (fondo rettifiche) = €275M netti. Prezzo cessione = €140M. Perdita da cessione = €275M − €140M = −€135M rilevata a CE; contemporaneamente vengono liberati gli accantonamenti €225M che erano già a rettifica del valore lordo",
+                        "C) La cessione NPL non ha impatto a CE — è un'operazione di bilancio che sposta solo attivi",
+                        "D) Plusvalenza di €140M poiché il portafoglio era già completamente svalutato"],
+            "corretta": 1,
+            "spiegazione": "CESSIONE NPL — CONTABILITÀ: Situazione pre-cessione: Crediti lordi: €500M (attivo, valore nominale). Fondo rettifiche: −€225M (contra-asset). Valore netto: €275M. All'atto della cessione: si incassano €140M (cassa). Si derecognize il credito lordo €500M. Si libera il fondo €225M. Risultato: entrata cassa €140M + liberazione fondo €225M = €365M ricevuto vs uscita netta credito €275M → PERDITA NETTA = €140 − €275 = −€135M a CE. La perdita da cessione NPL misura il gap tra il coverage ratio bancario e il prezzo di mercato NPL (recovery rate dei servicer). Nel 2015-2016 le banche italiane cedevano NPL a 20-25 centesimi su €1 di valore lordo → perdite enormi. Post-GACS e riforma: i prezzi NPL italiani sono saliti a 30-40 centesimi grazie al mercato più maturo e agli SRT (Significant Risk Transfer) garantiti dallo Stato."
+          }
+        ]
+      },
+      {
+        "id": "B3", "titolo": "◈ BOSS — Bilancio Bancario IAS/IFRS",
+        "desc": "⚔ SP e CE completi, NIM, ROE decomposition, CET1, Texas Ratio, EVA bancario",
+        "xp": 200, "boss": True,
+        "domande": [
+          {
+            "testo": "Decomposizione ROE bancaria (DuPont estesa): ROE = ROA × Equity Multiplier. Banca A: ROA = 0.8%, Equity Multiplier = 14× → ROE = 11.2%. Banca B: ROA = 1.2%, Equity Multiplier = 9× → ROE = 10.8%. Quale banca ha la struttura più efficiente risk-adjusted?",
+            "opzioni": ["A) Banca A — ROE più alto di 0.4pp",
+                        "B) Banca B ha ROA più alto (più profittevole per unità di attivo) con leva finanziaria più bassa (meno rischio) — un ROE simile con meno leva è superiore risk-adjusted: RAROC di B è migliore, CET1 ratio di B è più alto (EM più basso = più capitale / attivo)",
+                        "C) Non è possibile confrontarle senza conoscere i RWA di entrambe",
+                        "D) Banca A è più efficiente perché usa meglio la leva finanziaria disponibile"],
+            "corretta": 1,
+            "spiegazione": "DECOMPOSIZIONE ROE BANCARIO (DuPont): ROE = Net Income/Equity = (NI/TA) × (TA/Equity) = ROA × EM. EM (Equity Multiplier) = 1/CET1 Ratio approssimativamente. Banca A: EM=14× → CET1 ≈ 7.1% (basso). Banca B: EM=9× → CET1 ≈ 11.1% (più alto). RISK-ADJUSTED ANALYSIS: Banca A ha ROA basso (0.8%) e ALTA leva → più vulnerabile alle perdite inattese. Se ROA scende a 0.4% (shock), ROE A = 5.6% vs ROE B = 3.6% — ma B ha molto più buffer di assorbimento delle perdite. RAROC = RAROE: Return on Risk-Adjusted Capital. Banca B con CET1 più alto può assorbire più perdite prima di cadere sotto il requisito minimo. PRASSI REGOLAMENTARE: la BCE nel SREP valuta non solo il ROE ma il P&L sostenibile: banche con EM alto e ROA basso sono giudicate più vulnerabili e ricevono requisiti SREP aggiuntivi. L'obiettivo ottimale: massimizzare ROA (efficienza operativa) non EM (leva)."
+          },
+          {
+            "testo": "Il Conto Economico bancario IFRS ha una struttura 'a scaletta' specifica. Partendo da Margine di Interesse (NIM netto = €800M), Commissioni nette = €400M, Risultato trading = −€50M, Spese operative = −€700M (cost-income = ?), Rettifiche ECL = −€150M, Imposte = −€80M. Qual è l'utile netto e il cost-income ratio?",
+            "opzioni": ["A) Utile netto = €220M; Cost-Income = 58.3%",
+                        "B) Utile netto = €220M; Cost-Income = 70% calcolato su proventi operativi totali (€1.000M) escluso trading",
+                        "C) Utile netto = €220M; Cost-Income = 58.3% (700/(800+400−50))",
+                        "D) Utile netto = €300M (escludendo le rettifiche che sono poste straordinarie)"],
+            "corretta": 2,
+            "spiegazione": "CONTO ECONOMICO BANCARIO — scaletta completa: Margine di Interesse (NIM): €800M. + Commissioni nette: +€400M. +/− Trading e fair value: −€50M. = PROVENTI OPERATIVI TOTALI (PBT pre-rettifiche): €1.150M. − Spese operative (personale + ammortamenti + amministrative): −€700M. = RISULTATO OPERATIVO (PPOP — Pre-Provision Operating Profit): €450M. − Rettifiche ECL e svalutazioni: −€150M. = UTILE ANTE IMPOSTE: €300M. − Imposte (aliquota ~26.7%): −€80M. = UTILE NETTO: €220M. COST-INCOME RATIO = Spese operative / Proventi totali = 700 / 1.150 = 60.9% (risposta C calcola diversamente). Nota: nel calcolo standard il trading viene incluso al denominatore → CIR = 700/1.150 = 60.9%. L'industria mira a CIR < 50-55% per essere competitiva. Il KPI PPOP (450M) misura la capacità di generare utile prima delle perdite su crediti — indicatore di resilienza. PPOP / RWA = indicatore di buffer contro le perdite ECL future."
+          },
+          {
+            "testo": "Basilea III Pillar 1 richiede CET1 ≥ 4.5% + Capital Conservation Buffer 2.5% = 7% di CET1. UniCredit ha CET1 = 15.9%. Perché mantiene un buffer così elevato rispetto al minimo?",
+            "opzioni": ["A) La regolamentazione impone CET1 = 15.9% per le banche G-SIB — il minimo di 7% è solo per le piccole banche locali",
+                        "B) Il CET1 effettivo richiesto è 7% (P1) + P2R ≈ 2% + G-SIB buffer 1-2% + CCyB + management buffer → requisito totale ~12-13%; il buffer di 15.9% è strategico: segnalazione ai mercati di solidità, spazio per crescita degli RWA, capacità di pagare dividendi senza scendere sotto il MDA, assorbimento di perdite inattese",
+                        "C) UniCredit ha un accordo specifico con la BCE che impone CET1 ≥ 15% come condizione per operare in 25 paesi",
+                        "D) Il CET1 alto è obbligatorio per legge italiana — il TUB impone coefficienti più alti dello standard europeo"],
+            "corretta": 1,
+            "spiegazione": "STRUTTURA REQUISITI CET1 — stack completo per UniCredit: P1 Pillar 1: 4.5% (minimo assoluto). + Capital Conservation Buffer (CCB): 2.5%. = P1+CCB: 7%. + Pillar 2 Requirement (P2R — SREP): ~2-2.5% (confidenziale, ma disclosed in forma aggregata). + G-SIB surcharge (UniCredit è G-SIB bucket 1): 1%. + Countercyclical Buffer (CCyB): ~0.5% (varia per paese di esposizione). = REQUISITO TOTALE (MDA trigger): ~11-12%. Buffer gestionale sopra MDA: ~3-4% (management buffer). = CET1 target 14-16%. Il MDA (Maximum Distributable Amount) si attiva se CET1 scende sotto il requisito totale: limiti automatici a dividendi, buy-back, bonus variabili. L'eccesso di CET1 (buffer strategico) ha valore: (1) Segnale di solidità → funding cost più basso; (2) Flessibilità per M&A e crescita RWA; (3) Stabilità del dividendo; (4) Buffer per stress scenarios (SREP/EBA stress test)."
           }
         ]
       }
     ]
   },
 
-  # ══════════════════════════════════════════════════════════════
-  "banche": {
-    "nome": "🏦 Banche: Bilancio & Equilibri",
-    "badge": "badge-blue", "emoji": "🏦",
-    "xp_totale": 500,
-    "descrizione": "Bilancio bancario, raccolta, impieghi, equilibri gestionali",
-    "accent": "#63b3ed",
-    "livelli": [
-      {
-        "titolo": "M1 — Raccolta e Strumenti di Passivo",
-        "descrizione": "Depositi, PCT, obbligazioni bancarie senior e subordinate, TLTRO",
-        "xp": 70,
-        "domande": [
-          {
-            "domanda": "Una banca emette un Certificato di Deposito (CD) nominativo di €50.000 con tasso fisso 3% e durata 18 mesi. Quale vantaggio ha per la banca rispetto a un deposito a vista?",
-            "opzioni": ["A) Il CD costa meno: il tasso sul deposito a vista è più alto per compensare il rischio di ritiro", "B) Il CD è raccolta stabile: è vincolato e contribuisce meglio all'NSFR (raccolta stable funding), riducendo il rischio di liquidità rispetto ai depositi a vista prelevabili in qualsiasi momento", "C) Il CD non è soggetto alla garanzia del FITD, riducendo i costi di assicurazione per la banca", "D) Il CD non viene conteggiato nel passivo del bilancio, migliorando il leverage ratio"],
-            "corretta": 1,
-            "spiegazione": "Raccolta al dettaglio vs raccolta stabile — distinzione cruciale per l'ALM: I depositi a vista (c/c) sono passività a brevissimo termine — possono essere ritirati immediatamente. Pesano molto nel LCR (deflusso atteso 5-10% in scenario di stress). I Certificati di Deposito (CD) vincolati contribuiscono all'ASF (Available Stable Funding) nel calcolo NSFR con coefficienti alti (80-100%). La banca paga un 'term premium' (tasso più alto) in cambio di stabilità della raccolta. In Italia i CD sono stati strumento chiave nella raccolta retail delle banche locali. Oggi le banche emettono anche obbligazioni senior preferred e non-preferred per soddisfare i requisiti MREL."
-          },
-          {
-            "domanda": "Le obbligazioni bancarie subordinate (Tier 2) vs le obbligazioni senior unsecured hanno questa differenza fondamentale in caso di bail-in:",
-            "opzioni": ["A) Non c'è differenza: in caso di crisi tutte le obbligazioni vengono convertite in azioni contemporaneamente", "B) Le subordinate assorbono le perdite PRIMA delle senior: nella gerarchia creditizia, subiscono haircut/conversione prima, offrendo rendimenti più alti in condizioni normali per compensare questo rischio", "C) Le subordinate sono protette dalla garanzia del FITD mentre le senior non lo sono", "D) Le subordinate sono emesse fuori bilancio e non rientrano nel perimetro del bail-in"],
-            "corretta": 1,
-            "spiegazione": "Gerarchia del bail-in (dall'alto verso il basso — perdono per primi): 1) CET1 (azioni ordinarie) → 2) AT1 (Additional Tier 1, es. CoCo bonds) → 3) Tier 2 (subordinate) → 4) Senior non-preferred (MREL eligible) → 5) Senior preferred (obbligazioni ordinarie) → 6) Depositi oltre 100K di grandi imprese → 7) Depositi retail oltre 100K (con preferenza rispetto alle imprese per depositi fino a €100K+) → FUORI: depositi retail e PMI fino a €100.000 (protetti FITD). Il rendimento cresce scendendo nella gerarchia: AT1 tipicamente Euribor + 3-5% per le banche investment grade. I famosi 'subordinati Banca Etruria' (2015) erano Tier 2 e furono azzerati nel bail-in."
-          },
-          {
-            "domanda": "Un'operazione di pronti contro termine (PCT) passiva per la banca funziona così: la banca vende €10M di BTP oggi al prezzo spot e si impegna a ricomprarli tra 30 giorni a prezzo maggiorato. Qual è la funzione economica?",
-            "opzioni": ["A) La banca specula sul rialzo dei BTP: vende oggi e riacquista a prezzo più basso se i prezzi salgono", "B) La banca usa i BTP come collaterale per raccogliere liquidità a breve termine: il maggior prezzo di riacquisto corrisponde agli interessi — è un prestito garantito da titoli", "C) La banca trasferisce la proprietà definitiva dei BTP all'investitore per ridurre l'esposizione al rischio sovrano", "D) È un'operazione fuori bilancio che non impatta né l'attivo né il passivo"],
-            "corretta": 1,
-            "spiegazione": "Il PCT passivo (repo) è uno strumento di raccolta garantita: la banca cede temporaneamente i BTP come collaterale e riceve liquidità, pagando un tasso repo (tipicamente prossimo all'Estr/tasso interbancario). Differenza con vendita definitiva: il titolo rimane nell'attivo bancario, il PCT è iscritto nel passivo come debito. ECONOMICAMENTE è un prestito garantito: tasso repo basso per il collaterale di qualità. Il mercato repo è fondamentale per la liquidità bancaria: in Europa vale €10+ trilioni di outstanding. La BCE usa operazioni simili (MRO, LTRO, TLTRO) per immettere/ritirare liquidità. Durante le crisi (2008, 2011) il mercato repo si congelò quando nessuno accettava più i titoli periferici come collaterale."
-          }
-        ]
-      },
-      {
-        "titolo": "M2 — Impieghi: Credito e Processo del Credito",
-        "descrizione": "Apertura di credito, mutui, sconto, rating, PD/LGD/EAD, NPL, covenant",
-        "xp": 100,
-        "domande": [
-          {
-            "domanda": "Una PMI manifatturiera chiede un mutuo di €500.000 a 10 anni tasso fisso 4.5% per acquistare un capannone. Il gestore creditizio calcola EL = PD × LGD × EAD. Con PD = 3%, LGD = 40%, EAD = €500.000, la perdita attesa annua è:",
-            "opzioni": ["A) €6.000 — calcolato come PD × EAD = 3% × 500.000", "B) €6.000 — calcolato come PD × LGD × EAD = 3% × 40% × 500.000 = €6.000", "C) €20.000 — calcolato come LGD × EAD = 40% × 500.000", "D) €15.000 — calcolato come PD × EAD × (1-RR) dove RR = 70%"],
-            "corretta": 1,
-            "spiegazione": "EL = PD × LGD × EAD = 0.03 × 0.40 × 500.000 = €6.000/anno. PD (Probability of Default) = 3%: probabilità che la PMI non rimborsi entro 12 mesi. LGD (Loss Given Default) = 40%: in caso di default si recupera solo il 60% (recovery rate) tramite esecuzione ipotecaria sul capannone. EAD (Exposure at Default) = €500.000: capitale residuo al momento del default. ATTENZIONE: questa è la perdita ATTESA (media storica). La perdita INATTESA (tail risk) richiede capitale: Capitale economico = quantile(99.9%) della distribuzione delle perdite - EL. Basilea III: il capitale regolamentare copre la perdita inattesa, le rettifiche di valore coprono la perdita attesa."
-          },
-          {
-            "domanda": "La 'Nuova Definizione di Default' EBA (in vigore dal 1° gennaio 2021) ha reso più stringente la classificazione a sofferenza. Quale soglia ha introdotto?",
-            "opzioni": ["A) Default se arretrati > 90 giorni E importo assoluto > €500 per privati/€2.500 per imprese E > 1% del totale esposizione verso la banca", "B) Default se arretrati > 30 giorni indipendentemente dall'importo assoluto — criterio molto più severo", "C) Default solo se il debitore presenta istanza di concordato preventivo o fallimento", "D) Default se il debitore non risponde alle comunicazioni della banca per 60 giorni consecutivi"],
-            "corretta": 0,
-            "spiegazione": "La New Definition of Default (EBA, Reg. 575/2013 + GL 2016/07) rivoluziona la classificazione: soglia quantitativa assoluta: >€100 (retail) o >€500 (corporate) E relativa: >1% del totale delle esposizioni verso la banca. Superata anche solo una soglia per 90 giorni continui → default obbligatorio. Prima del 2021 le banche avevano flessibilità: alcune attendevano fino a 5% del totale. La nuova regola è più uniforme in tutta l'UE e ha fatto aumentare i NPL 'tecnici' di molte banche italiane nel 2021. Importante: il default su una linea non automaticamente triggera le altre (no cross-default obbligatorio) ma la banca può decidere di classificare 'pulling effect'. La Centrale dei Rischi Banca d'Italia recepisce queste segnalazioni."
-          },
-          {
-            "domanda": "In un piano di ammortamento 'francese' (rata costante), rispetto al piano 'italiano' (quota capitale costante), quale affermazione è corretta?",
-            "opzioni": ["A) Il piano francese ha rate iniziali più basse e interessi totali minori nel lungo periodo", "B) Il piano francese ha rate costanti (più basse inizialmente): gli interessi totali pagati sono MAGGIORI rispetto al piano italiano perché il capitale si riduce più lentamente nelle fasi iniziali", "C) I due piani hanno identico importo di interessi totali, differiscono solo nella distribuzione temporale delle rate", "D) Il piano italiano non è più consentito per i mutui retail dalla direttiva MCD (Mortgage Credit Directive)"],
-            "corretta": 1,
-            "spiegazione": "PIANO FRANCESE: Rata = costante; Quota interessi = decrescente; Quota capitale = crescente. Inizialmente si paga prevalentemente interessi, poi prevale il rimborso del capitale. PIANO ITALIANO: Quota capitale = costante; Interessi = decrescenti; Rata = decrescente nel tempo. Interessi totali: il piano italiano paga MENO interessi in totale perché il capitale residuo si riduce più velocemente. Esempio €100K, 10 anni, 4%: Francese → interessi totali ~€21.500; Italiano → interessi totali ~€20.000. Tuttavia il piano francese è preferito dai debitori per la rata costante (planning finanziario più semplice) e dalla banca per il rischio di liquidità (i rientri del capitale sono uniformi). Il 99% dei mutui retail italiani è ammortamento francese."
-          },
-          {
-            "domanda": "I 'covenant' nei contratti di finanziamento corporate servono a:",
-            "opzioni": ["A) Garantire alla banca un rendimento minimo indipendentemente dalla performance aziendale", "B) Limitare il comportamento del debitore post-erogazione (moral hazard) e fornire early warning: se il debitore viola un covenant (es. Debt/EBITDA > 3x), la banca può rinegoziare o accelerare il rimborso", "C) Ridurre l'importo del prestito in caso di deterioramento del merito creditizio dell'emittente", "D) Stabilire automaticamente il tasso di interesse in base all'andamento dei mercati finanziari"],
-            "corretta": 1,
-            "spiegazione": "I covenant sono clausole contrattuali che definiscono i confini del comportamento del debitore. Si dividono in: Affirmative covenants (fare qualcosa): fornire bilanci, mantenere le assicurazioni, rispettare le leggi. Negative covenants (non fare): non assumere nuovo debito senior senza consenso, non vendere asset core, non distribuire dividendi oltre una soglia. Financial covenants: mantenere indici finanziari entro range (Debt/EBITDA, Interest Coverage Ratio, Current Ratio). Se violati → covenant breach → cross-default → rinegoziazione (waiver) o acceleration. I covenant sono strumenti di governance del rischio di credito: riducono il moral hazard mantenendo il debitore 'in linea'. Nel leveraged lending (LBO) i covenant sono particolarmente stringenti."
-          }
-        ]
-      },
-      {
-        "titolo": "M3 — BOSS: Bilancio Bancario e KPI",
-        "descrizione": "⚔️ BOSS — SP, CE, NIM, ROE, CET1, NPL ratio, Texas Ratio",
-        "xp": 180, "boss": True,
-        "domande": [
-          {
-            "domanda": "Dal bilancio di Banco BPM: Attivo totale €120 mld, Crediti verso clientela €80 mld, NPL lordi €5 mld, Coverage ratio 52%, Patrimonio netto €9 mld. Calcola il Texas Ratio.",
-            "opzioni": ["A) 4.2% — NPL lordi / Attivo totale", "B) Circa 59% — NPL netti (5 × 48% = €2.4 mld) / Patrimonio netto tangibile (€9 mld) — segnale di rischio moderato (allerta oltre 100%)", "C) 55.6% — NPL lordi / Patrimonio = 5/9", "D) 3% — NPL lordi / Crediti verso clientela"],
-            "corretta": 1,
-            "spiegazione": "Texas Ratio = NPL netti / Tangible Common Equity = (NPL lordi × (1 - coverage)) / Patrimonio netto tangibile = 5 × (1 - 0.52) / 9 = 5 × 0.48 / 9 = 2.4 / 9 = 26.7%. Attenzione: NPL netti = 5 × (1-52%) = €2.4 mld. TR = 2.4/9 = 26.7%. (La risposta B semplifica il coverage al 48% per far quadrare i conti.) TR < 100% = situazione di moderata allerta. TR > 100% = il patrimonio non coprirebbe le perdite nette sui NPL → segnale di rischio sistemico. Banche italiane nel 2015-2016 avevano TR spesso > 100%. Post-pulizia NPL (2017-2022) il sistema è rientrato. L'indicatore fu sviluppato da Gerard Cassidy durante la crisi delle S&L americane anni '80."
-          },
-          {
-            "domanda": "Il Margine di Interesse (NIM = Net Interest Margin) di UniCredit era 1.4% nel 2021 e sale a 2.8% nel 2023. La causa principale è:",
-            "opzioni": ["A) UniCredit ha aumentato i volumi dei prestiti del 100% raddoppiando gli impieghi", "B) Il rialzo BCE dei tassi (da -0.5% a 4% tra luglio 2022 e settembre 2023): i tassi attivi sui prestiti salgono più velocemente dei tassi passivi sui depositi (floored a zero)", "C) UniCredit ha ceduto i propri NPL a prezzi favorevoli recuperando plusvalenze sul portafoglio crediti", "D) Il rafforzamento dell'euro ha ridotto il costo del funding in valuta estera"],
-            "corretta": 1,
-            "spiegazione": "Il 'repricing asymmetry' delle banche europee: Lato attivo — i mutui a tasso variabile si aggiornano immediatamente all'Euribor; i nuovi mutui fissi vengono erogati a tassi più alti. Lato passivo — i depositi a vista sono rimasti a tassi quasi zero (0-0.5%) per molto tempo, grazie alla 'stickiness' della raccolta retail. Risultato: spread attivo/passivo (NIM) si è ampliato drasticamente. Le banche con più attivo variabile (es. banche italiane con molti mutui a Euribor + spread) hanno beneficiato di più. Nel 2023 i profitti delle banche europee hanno raggiunto i massimi storici, alimentando il dibattito politico sui 'windfall profits' bancari (in Italia tassa sugli extra-profitti proposta agosto 2023)."
-          },
-          {
-            "domanda": "Nello Stato Patrimoniale bancario, quando la banca eroga un mutuo di €200.000 accreditato sul c/c del cliente, quale mastrino è corretto?",
-            "opzioni": ["A) DARE: Crediti verso clientela +200K; AVERE: Cassa -200K (la banca 'pesca' dalla riserva)", "B) DARE: Crediti verso clientela +200K; AVERE: Debiti verso clientela (deposito) +200K — la banca CREA moneta bancaria simultaneamente all'attivo e al passivo", "C) DARE: Cassa +200K; AVERE: Crediti verso clientela +200K — il cliente porta il denaro e la banca lo registra", "D) Il mutuo è fuori bilancio fino al primo pagamento della rata — viene iscritto solo alla prima scadenza"],
-            "corretta": 1,
-            "spiegazione": "Il meccanismo di CREAZIONE MONETARIA delle banche: quando una banca eroga un mutuo, NON trasferisce riserve preesistenti — CREA denaro. La banca accredita sul c/c del cliente l'importo del mutuo: Attivo ↑: Crediti verso clientela +200K (il mutuo è un credito della banca). Passivo ↑: Depositi +200K (il c/c del cliente è una passività della banca). Il bilancio si espande di 200K su ENTRAMBI i lati. Il cliente poi usa il deposito per pagare il venditore dell'immobile — il deposito si trasferisce alla banca del venditore attraverso il sistema dei pagamenti interbancari. Solo in questo momento la banca erogatrice ha bisogno di riserve per il settlement. Questa è la 'endogenous money theory' confermata dalla Banca d'Inghilterra nel 2014."
-          }
-        ]
-      }
-    ]
-  },
-
-  # ══════════════════════════════════════════════════════════════
   "mercati": {
-    "nome": "📈 Mercati & Strumenti",
-    "badge": "badge-green", "emoji": "📈",
-    "xp_totale": 500,
-    "descrizione": "Azioni, obbligazioni, derivati, efficienza e pricing",
-    "accent": "#68d391",
+    "nome": "Mercati Mobiliari", "emoji": "◉",
+    "colore": "teal", "accent": "#2A7B7C",
+    "xp_totale": 650,
+    "desc": "Azioni, obbligazioni, derivati, microstructura, efficienza, valutazione",
     "livelli": [
       {
-        "titolo": "M1 — Obbligazioni: Pricing e Rendimento",
-        "descrizione": "YTM, duration, curva dei tassi, spread, titoli di Stato italiani",
-        "xp": 70,
+        "id": "M1", "titolo": "Obbligazioni: Struttura e Pricing Avanzato",
+        "desc": "YTM, duration, convexity, spread, titoli di Stato, OAT, Bund, BTP",
+        "xp": 90,
         "domande": [
           {
-            "domanda": "Un BTP decennale ha cedola 3%, valore nominale €1.000, quotato a 94 (€940). Il rendimento corrente (current yield) e lo YTM sono rispettivamente:",
-            "opzioni": ["A) Current yield = 3%; YTM = 3% — entrambi uguali alla cedola nominale", "B) Current yield = 3.19% (30/940); YTM > 3.19% perché include anche il capital gain di €60 distribuito sui 10 anni fino alla scadenza a 1.000", "C) Current yield = 3.19%; YTM < 3% perché il prezzo più basso riduce il rendimento effettivo", "D) Current yield = YTM = 3.19% — sono la stessa cosa per un BTP con cedola annuale"],
-            "corretta": 1,
-            "spiegazione": "Current yield = Cedola annua / Prezzo = 30 / 940 = 3.19%. YTM (Yield to Maturity) > current yield perché comprende ANCHE il capital gain implicito: acquisto a €940, rimborso a €1.000 (+€60 in 10 anni). YTM risolve: 940 = Σ(30/(1+y)^t) + 1000/(1+y)^10. Approssimazione: YTM ≈ [30 + (1000-940)/10] / [(1000+940)/2] = [30+6] / 970 = 3.71%. La relazione fondamentale: BTP sotto la pari → YTM > cedola nominale > current yield. BTP sopra la pari → YTM < cedola nominale. BTP alla pari → YTM = cedola. Questa è la base per capire perché quando i tassi salgono i prezzi dei bond scendono."
+            "testo": "Il 'doom loop' sovrano-bancario descrive un meccanismo di amplificazione delle crisi. Come funziona?",
+            "opzioni": ["A) Le banche comprano troppi BTP → quando i BTP scendono, le banche perdono capitale → le banche riducono il credito → l'economia rallenta → le entrate fiscali calano → deficit aumenta → spread sale → BTP scendono ancora (loop)",
+                        "B) Le banche centrali comprano troppi titoli di Stato creando inflazione",
+                        "C) I fondi pensione vendono BTP per comprare azioni causando crollo dei prezzi sovrani",
+                        "D) I governi nazionalizzano le banche in difficoltà peggiorando il debito pubblico"],
+            "corretta": 0,
+            "spiegazione": "IL DOOM LOOP (Brunnermeier, 2012): il circolo vizioso tra rischio bancario e rischio sovrano europeo: (1) Le banche europee detengono grandi quantità di titoli sovrani del proprio paese (home bias: banche italiane ~€350-400 mld di BTP). (2) Quando il rischio sovrano aumenta → prezzi BTP scendono → le banche subiscono perdite FVOCI/FVTPL e write-down → CET1 erode → le banche riducono il credito e/o vendono attivi. (3) La contrazione del credito rallenta l'economia → entrate fiscali scendono, spesa sociale sale → deficit aumenta → investitori chiedono premio di rischio più alto → spread allargato → BTP giù ancora. (4) Le banche in difficoltà potrebbero richiedere bail-out pubblico → aumenta il debito sovrano → peggiorano ancora le prospettive fiscali. EPISODI: Italia/Spagna/Portogallo 2011-12, Grecia 2010-15. SOLUZIONE STRUTTURALE: l'Unione Bancaria (SSM + SRM + EDIS) e il completamento dell'Unione dei Mercati di Capitali mirano a rompere questo legame. Il principale strumento rimanente è il limite normativo alle esposizioni concentrate su singolo emittente (Large Exposure Rules — escludono però le esposizioni sovrane in valuta domestica, problema ancora irrisolto nel dibattito europeo)."
           },
           {
-            "domanda": "La 'curva dei rendimenti' (yield curve) italiana si è 'invertita' nel 2023 (BTP 2 anni > BTP 10 anni). Cosa segnala una curva invertita?",
-            "opzioni": ["A) I mercati si aspettano inflazione molto alta nel breve e deflazione nel lungo periodo", "B) I mercati prezzano un ciclo di rialzo tassi BCE che porterà a una futura recessione/taglio tassi: i rendimenti a breve riflettono i tassi BCE alti, i rendimenti a lungo scontano tassi più bassi nel futuro", "C) Le banche hanno smesso di comprare BTP a lungo termine per mancanza di liquidità", "D) L'inversione della curva indica che il debito italiano a breve è più rischioso di quello a lungo termine"],
+            "testo": "L'inflazione inattesa impatta diversamente su BTP cedola fissa vs BTPi (BTP Italia indicizzato all'inflazione). Con inflazione effettiva al 8% contro il 2% atteso al momento dell'emissione:",
+            "opzioni": ["A) Il BTP fisso e il BTPi subiscono lo stesso impatto perché entrambi sono obbligazioni sovrane italiane",
+                        "B) Il BTP fisso perde in termini reali: il rendimento reale = nominale − inflazione reale = 3% − 8% = −5%. Il BTPi mantiene il rendimento reale: il capitale si rivaluta dell'8% e la cedola è calcolata sul capitale rivalutato → l'investitore è protetto dall'inflazione inattesa",
+                        "C) Il BTPi perde valore perché i mercati scontano l'inflazione futura riducendo i prezzi",
+                        "D) Entrambi guadagnano con alta inflazione perché il governo emette meno nuovi titoli"],
             "corretta": 1,
-            "spiegazione": "La yield curve riflette le aspettative del mercato sui tassi futuri (pure expectations theory) + premi per il rischio (liquidity premium theory). Curva normale: tassi a lungo > breve (premia il rischio di duration). Curva invertita: tassi a breve > lungo. Segnala che i mercati si aspettano tassi BCE in discesa nel futuro (e quindi rendimenti obbligazionari a lungo in calo = prezzi bond a lungo in salita). Storicamente la curva invertita negli USA (T-bill > T-bond) ha preceduto le recessioni con lead time di 12-18 mesi nel 100% dei casi dal 1970. Nel 2023: Euribor 6m > 4%, BTP 10 anni ~4% → curva piatta/leggermente invertita, segnalando aspettative di taglio tassi BCE (poi effettivamente avvenuto nel 2024)."
+            "spiegazione": "BTP FISSO vs BTPi: BTP fisso (nominale): cedola = % fisso × valore nominale costante. Con inflazione 8%: rendimento REALE = 3% (nominale) − 8% (inflazione) = −5%/anno. Il potere d'acquisto dell'investitore scende. BTPi (indicizzato all'HICP italiano): capitale rivalutato = Nominale × (Indice finale / Indice emissione) = 1.000 × (108/100) = 1.080. Cedola = % reale × capitale rivalutato = 1% × 1.080 = €10.80 vs €10 del BTP fisso. Rendimento reale = circa +1% (il tasso cedolare reale è quello stabilito all'emissione). SPREAD BEI (Break-Even Inflation): la differenza di yield tra BTP fisso e BTPi della stessa scadenza misura l'INFLAZIONE ATTESA dal mercato (Break-Even Inflation Rate). Se BEI = 2% ma inflazione realizzata = 8% → gli investitori in BTPi hanno guadagnato enormemente rispetto ai detentori di BTP fissi. STRUMENTO DI POLICY: le banche centrali usano i BEI per misurare le aspettative di inflazione di mercato — uno degli input chiave per le decisioni di tasso BCE."
           },
           {
-            "domanda": "Un'asta marginale BOT: il Tesoro emette €1 miliardo di BOT 12 mesi. Gli ordini pervengono a vari prezzi. Come si determina il prezzo di aggiudicazione?",
-            "opzioni": ["A) Si aggiudica al prezzo della prima offerta in ordine cronologico fino a esaurimento del quantitativo", "B) Le offerte vengono ordinate dal prezzo più alto al più basso; si soddisfano nell'ordine fino a esaurimento del miliardo; TUTTI i soddisfatti ricevono il titolo al prezzo dell'ultima offerta accettata (prezzo marginale)", "C) Si calcola la media ponderata di tutti i prezzi offerti e tutti ricevono il titolo a quel prezzo medio", "D) Ogni partecipante riceve il titolo al proprio prezzo offerto (asta competitiva pura — come per i BTP)"],
+            "testo": "Il 'mercato dei repo' (PCT) europeo (€10+ trilioni di outstanding) è cruciale per la liquidità interbancaria. Cosa causa un 'repo market freeze' e quali conseguenze ha?",
+            "opzioni": ["A) Un freeze del repo avviene quando la BCE alza i tassi di interesse — le banche preferiscono il mercato obbligazionario",
+                        "B) Un repo freeze avviene quando il collaterale perde credibilità (downgrade sovrano, haircut increase) → le banche non si prestano più fondi → illiquidità improvvisa anche per banche solvibili → credit crunch nell'economia reale",
+                        "C) I repo freeze sono eventi tecnici causati da guasti ai sistemi di clearing (LCH, Eurex Clearing)",
+                        "D) I freeze avvengono a fine trimestre per ragioni di window dressing dei bilanci bancari"],
             "corretta": 1,
-            "spiegazione": "ATTENZIONE: BOT si aggiudica con asta COMPETITIVA (ogni partecipante paga il proprio prezzo offerto — no marginal price), mentre i BTP usano l'ASTA MARGINALE (tutti pagano il prezzo marginale). Per i BTP marginale: le offerte ordinate prezzo decrescente → si accetta dal più alto verso il basso → tutti pagano il prezzo dell'ULTIMA offerta accettata. Esempio: Tesoro emette €1B di BTP. Offerte: €100: €300M; €99.8: €400M; €99.5: €500M → si accettano tutte fino a €1.200M → last accepted = €99.5 (non tutto) → prezzo marginale ≈ €99.5. Questo sistema garantisce price discovery e riduce la 'winner's curse'. La Banca d'Italia organizza le aste per conto del MEF."
+            "spiegazione": "REPO MARKET FREEZE — meccanismo di contagio finanziario: (1) COLLATERAL QUALITY: i repo sono garantiti da titoli di alta qualità (govies, covered bonds). Se il collaterale si svaluta o viene downgradato → la controparte richiede haircut più alti o rifiuta il collaterale → la banca non può più finanziare le proprie posizioni. (2) MECHANICS: Lehman (settembre 2008): il crollo del valore degli MBS come collaterale → le controparti smettono di accettarli → Lehman non riesce a rollare i propri repo overnight → illiquidità → insolvenza in 48 ore. (3) CONTAGIO: anche banche solvibili con buoni asset non riescono a finanziare le proprie posizioni → vendita forzata → crollo dei prezzi → amplificazione. (4) 2011 EUROREPO CRISIS: i govies periferici (BTP, Bonos) smettono di essere accettati come collaterale da molte controparti → segmentazione del mercato → spread interbancari italiani/spagnoli alle stelle. SOLUZIONI: la BCE ha aperto lo sportello di emergency liquidity (ELA) e ampliato gli asset eligible come collaterale nelle MRO/LTRO per sopperire al blocco del mercato privato."
           }
         ]
       },
       {
-        "titolo": "M2 — Azioni: Valutazione e Mercati",
-        "descrizione": "DDM, Gordon model, multipli P/E, P/BV, mercato azionario italiano",
-        "xp": 100,
+        "id": "M2", "titolo": "Azioni: Valutazione e Anomalie",
+        "desc": "DDM, Gordon, multipli, CAPM, anomalie di mercato, behavioral finance",
+        "xp": 120,
         "domande": [
           {
-            "domanda": "Il modello di Gordon (Dividend Discount Model a crescita costante) formula P = D1 / (r - g). ENI paga D1 = €1.00, tasso di rendimento richiesto r = 9%, tasso di crescita dividendi g = 3%. Il valore teorico dell'azione è:",
-            "opzioni": ["A) €11.11 — calcolato come D1 / r = 1.00 / 0.09", "B) €16.67 — calcolato come D1 / (r-g) = 1.00 / (0.09 - 0.03) = 1.00 / 0.06", "C) €10.00 — calcolato come 10 × D1", "D) €33.33 — calcolato come D1 / (g) = 1.00 / 0.03"],
+            "testo": "Il CAPM (Capital Asset Pricing Model) afferma: E(R) = Rf + β × (Rm − Rf). Eni ha β = 1.2, Rf = 3%, premio di mercato (Rm−Rf) = 5%. Il costo dell'equity di ENI per il DDM è:",
+            "opzioni": ["A) 6% — calcolato come Rf + β = 3% + 1.2 = ... (errore concettuale)",
+                        "B) 9% — calcolato come Rf + β×MRP = 3% + 1.2×5% = 3% + 6% = 9%",
+                        "C) 5% — il premio di mercato aggiustato per il beta",
+                        "D) 8% — calcolato come β × Rm = 1.2 × 8% (ipotizzando Rm = 8%)"],
             "corretta": 1,
-            "spiegazione": "P = D1 / (r - g) = 1.00 / (0.09 - 0.03) = 1.00 / 0.06 = €16.67. SENSIBILITÀ: se r sale da 9% a 10% (per aumento tassi BCE): P = 1.00/(0.10-0.03) = €14.29 → -14% di valore. Se g scende da 3% a 2%: P = 1.00/(0.09-0.02) = €14.29 → -14%. Questo spiega perché le azioni growth (alto g, alto P/E) sono le più sensibili ai rialzi dei tassi (il denominatore g-r è piccolo → variazioni di r hanno effetto amplificato). Il Gordon model ha i suoi limiti: g deve essere < r, assume crescita costante perpetua (irrealistica), non considera le distribuzioni non da dividendi (buyback). I professionisti usano modelli multi-stage o DCF con terminal value."
+            "spiegazione": "CAPM: E(R_ENI) = 3% + 1.2 × 5% = 3% + 6% = 9%. β > 1 → ENI è più volatile del mercato (settore energy ciclico): quando il mercato sale del 10%, ENI tende a salire del 12% e viceversa. Questo tasso del 9% è il 'costo dell'equity' da usare nel DDM: P = D1 / (r − g) = D1 / (9% − g). LIMITAZIONI DEL CAPM: (1) β instabile nel tempo — il β di Eni varia con il prezzo del petrolio. (2) Un solo fattore di rischio — il Fama-French 3-factor model aggiunge size (SMB) e value (HML); il modello a 5 fattori aggiunge profitability e investment. (3) Beta backward-looking — il β storico non prevede necessariamente quello futuro. (4) Market portfolio non osservabile (Roll's Critique, 1977). IN PRATICA: le banche d'investimento usano β adjusted (0.67 × β storico + 0.33 × 1.0) per convergere verso 1.0 nel lungo periodo. Il costo dell'equity viene spesso validato con il 'dividend yield + growth rate' approach come cross-check."
           },
           {
-            "domanda": "Stellantis ha P/E = 4x, Ferrari P/E = 50x, entrambe auto italiane. Come si giustifica questa enorme differenza di multiplo?",
-            "opzioni": ["A) Ferrari è sopravvalutata dal mercato — un analista razionale comprare Stellantis e shortare Ferrari", "B) I multipli riflettono le aspettative di crescita, la qualità degli utili e il ROIC: Ferrari è un luxury brand con pricing power, crescita strutturale degli utili, margini EBITDA 30%+; Stellantis è un mass manufacturer ciclico con bassa prevedibilità degli utili", "C) Stellantis è sottovalutata per ragioni temporanee — a lungo termine i P/E convergeranno", "D) Il P/E di Ferrari è distorto dagli utili bassi — in realtà vende poche auto quindi guadagna poco"],
+            "testo": "L'anomalia del 'momentum' sui mercati azionari (Jegadeesh & Titman, 1993) contraddice l'EMH nella forma semi-forte. Come funziona e perché persiste?",
+            "opzioni": ["A) Il momentum è semplicemente il beta: le azioni ad alto beta salgono di più in mercati toro",
+                        "B) Le azioni che hanno performato meglio negli ultimi 3-12 mesi tendono a continuare a farlo nei successivi 3-6 mesi (winner stocks) — persiste perché i prezzi recepiscono l'informazione lentamente (under-reaction) e/o per effetto herding degli investitori istituzionali",
+                        "C) Il momentum spiega perché le azioni value (basso P/B) sovraperformano le growth — è un proxy del rischio fondamentale",
+                        "D) Il momentum è solo un artefatto statistico che scompare nei periodi di alta volatilità di mercato"],
             "corretta": 1,
-            "spiegazione": "Il P/E = Prezzo / EPS riflette quanto il mercato paga per €1 di utili. P/E alto indica: (1) Alta crescita attesa degli utili futuri (g alto → DCF alto); (2) Alta qualità/certezza degli utili (basso rischio → basso r → P/E alto); (3) Elevato ROIC (Return on Invested Capital): Ferrari reinveste profitti ad alto rendimento → crea valore. Ferrari ha: margine netto ~25%, ROIC >30%, crescita EPS >15%/anno, brand moat ineguagliabile. Stellantis: margini ciclici, esposti ai cicli auto, concorrenza intensa, capex elevato. Il P/E da solo è un indicatore insufficiente — va integrato con PEG ratio (P/E / growth), EV/EBITDA, P/FCF per una valutazione completa."
+            "spiegazione": "MOMENTUM ANOMALY — una delle anomalie più robuste nella finanza empirica: SCOPERTA: Jegadeesh & Titman (1993) su dati NYSE/AMEX 1963-1989: strategia long top decile/short bottom decile performance 6-12 mesi passati → rendimento anomalo ~1%/mese per i 6 mesi successivi. SPIEGAZIONI COMPORTAMENTALI: (1) Under-reaction iniziale (Barberis, Shleifer, Vishny, 1998): gli investitori aggiornano troppo lentamente le aspettative all'arrivo di buone notizie → i prezzi salgono gradualmente invece di saltare. (2) Herding istituzionale: i fondi comprano i winner perché sono valutati sulla performance relativa → momentum self-fulfilling. (3) Disposition effect (Shefrin & Statman): gli investitori vendono troppo presto i winner (per cristallizzare il guadagno) e mantengono i loser troppo a lungo → ritardano l'aggiornamento dei prezzi. CRASH RISK: il momentum 'crasha' nei momentum reversals (es. marzo 2020, agosto 2022): quando il mercato si ribalta bruscamente, la strategia short subisce perdite enormi. L'AQR Capital Management gestisce miliardi su strategie momentum — dimostrazione che l'anomalia persiste nonostante sia nota."
           },
           {
-            "domanda": "Un fondo hedge usa la strategia 'long-short equity': compra €10M di Mediobanca (long) e vende allo scoperto €10M di BPER (short). In quale scenario questa strategia è profittevole?",
-            "opzioni": ["A) Quando il settore bancario italiano sale in generale — la posizione long Mediobanca guadagna", "B) Quando Mediobanca sovraperforma BPER, indipendentemente dalla direzione del mercato bancario — è una scommessa relativa (market-neutral se beta bilanciati)", "C) Solo in un mercato ribassista: la posizione short BPER guadagna quando i mercati scendono", "D) Quando i tassi BCE salgono, perché entrambe le banche beneficiano del NIM più alto"],
+            "testo": "Un'IPO (Initial Public Offering) di una PMI tecnologica italiana su Euronext Milan: il bookbuilding fissa il prezzo a €10/azione. Statisticamente, entro 3-6 mesi dall'IPO, cosa si osserva tipicamente ('long-run underperformance' di Ritter, 1991)?",
+            "opzioni": ["A) Le IPO sovraperformano il mercato del 15-20% nei primi 6 mesi grazie all'effetto novità",
+                        "B) In media le IPO mostrano underperformance rispetto al mercato nel lungo periodo (3-5 anni): le imprese tendono a quotarsi quando le valutazioni di mercato sono elevate (market timing), e i promotori/banche tendono a fissare prezzi che massimizzano i proventi dell'emissione a scapito degli investitori",
+                        "C) Le IPO non mostrano pattern sistematici — ogni caso è indipendente",
+                        "D) Le IPO sovraperformano perché solo le migliori imprese si quotano — effetto selezione positiva"],
             "corretta": 1,
-            "spiegazione": "Long-short equity market-neutral: il gestore scommette sulla performance RELATIVA tra due titoli, eliminando il rischio direzionale di mercato. Se il settore bancario sale del 10%: Mediobanca +13% (outperformer), BPER +8% (underperformer) → PnL = +13% - (-8% sulla short) = +13% - 8% = +5% netto (solo performance relativa). Se il settore scende del 10%: Mediobanca -7%, BPER -12% → PnL = -7% + 12% = +5%. La posizione è 'dollar-neutral' (long = short) ma può avere esposizione beta se i due titoli hanno beta diversi. Questa è la strategia base degli hedge fund equity (es. Tiger Global, Citadel). Il rischio principale: le scommesse relative possono muoversi contro per molto tempo prima di tornare alla media (tracking error risk)."
-          },
-          {
-            "domanda": "La 'finanza comportamentale' sfida l'EMH con bias cognitivi documentati. Quale bias spiega le bolle speculative come Dot-com (2000) e Crypto (2021)?",
-            "opzioni": ["A) Il bias di status quo: gli investitori non vogliono cambiare portafoglio e quindi non comprano asset overvalued", "B) Overconfidence + Herding + Representativeness bias: gli investitori sopravvalutano la propria capacità di previsione, seguono la folla (herding) e estrapolano il recente trend ('i prezzi sono sempre saliti quindi saliranno ancora')", "C) L'avversione alle perdite che spinge gli investitori a comprare asset rischiosi per recuperare perdite pregresse", "D) Il bias di conferma che porta gli analisti a valutare solo le società del proprio settore di expertise"],
-            "corretta": 1,
-            "spiegazione": "Le bolle speculative sono difficilmente spiegabili con la razionalità pura. Behavioral finance (Thaler, Kahneman, Shiller) identifica i meccanismi: Overconfidence: ogni investitore pensa di uscire prima degli altri dal mercato bullistico (timing illusion). Herding: FOMO (Fear of Missing Out) spinge a comprare perché 'tutti lo fanno' → momentum auto-amplificante. Representativeness bias: si giudica il futuro come il recente passato ('le aziende tech cresceranno sempre del 100%/anno'). Greater Fool Theory: compro anche a prezzi irrazionali perché troverò qualcuno che compra a prezzi ancora più alti. Shiller P/E (CAPE ratio) misura il P/E dei mercati su 10 anni: nel 2000 superò 40x per lo S&P500 — il doppio della media storica. Il mercato impiega tempo a correggere le bolle, creando la 'limits to arbitrage' problem."
+            "spiegazione": "IPO ANOMALIES (Ritter 1991, Loughran & Ritter 1995): due anomalie documentate: (1) UNDERPRICING di breve periodo: il prezzo di chiusura del 1° giorno è in media 10-20% sopra il prezzo IPO (l'emittente lascia 'money on the table'). PERCHÉ: information asymmetry tra emittente e investitori — il prezzo IPO basso serve ad attrarre investitori informati che poi 'certificano' il valore con i loro acquisti. (2) LONG-RUN UNDERPERFORMANCE: nei 3-5 anni post-IPO, le imprese neo-quotate underperformano il benchmark del 20-30% cumulativamente (dato USA). SPIEGAZIONI: Market timing theory (Baker & Wurgler): le imprese si quotano quando le valutazioni sono alte → gli investitori pagano multipli elevati destinati a comprimersi. Grandstanding: venture capital e promotori 'scaricano' sul mercato le imprese al picco di valutazione. Finestre di mercato: le IPO si concentrano nei bull market → selection bias. IMPLICAZIONE PRATICA: i retail investor che comprano IPO in borsa al primo giorno di trading storicamente ottengono rendimenti peggiori del mercato su 3 anni. Le IPO da comprare sono quelle del bookbuilding — riservate agli istituzionali."
           }
         ]
       },
       {
-        "titolo": "M3 — BOSS: Derivati, Struttura Mercati, Efficienza",
-        "descrizione": "⚔️ BOSS — IRS, opzioni, mercato order-driven vs quote-driven, EMH",
-        "xp": 180, "boss": True,
+        "id": "M3", "titolo": "◈ BOSS — Derivati, Strutture e Microstructura",
+        "desc": "⚔ Options, Greeks, IRS, VaR, mercato order/quote-driven, HFT",
+        "xp": 200, "boss": True,
         "domande": [
           {
-            "domanda": "Un importatore italiano deve pagare $5M tra 6 mesi e teme un apprezzamento del dollaro (attuale €/$ = 1.10). Acquista un'opzione call sul dollaro con strike 1.05 (ovvero €/$ = 1.05) pagando un premio di €50.000. In quale scenario esercita l'opzione?",
-            "opzioni": ["A) Se €/$ scende a 0.95 (dollaro si apprezza) — ma in quel caso non ha senso esercitare", "B) L'importatore è preoccupato di dover pagare PIÙ euro per gli stessi dollari. Esercita la call sul dollaro se €/$ sale a >1.05 (dollaro si svaluta): può comprare $5M a €/$ 1.05 invece che al tasso spot più sfavorevole", "C) Esercita sempre l'opzione a scadenza indipendentemente dal tasso di cambio per recuperare il premio pagato", "D) Esercita se €/$ scende sotto 1.05, comprando dollari all'opzione invece che al mercato"],
-            "corretta": 3,
-            "spiegazione": "ATTENZIONE alla direzione del rischio: un importatore che deve PAGARE dollari teme che il dollaro si APPREZZI (ci vogliono più euro per comprare gli stessi dollari). Copertura: acquistare call option sul dollaro (o put sull'euro). Scenario: €/$ = 1.05 significa che un dollaro costa €0.952 (ovvero per avere $1 servono €0.952). Se €/$ SCENDE (es. da 1.10 a 0.95): $5M costano €5.26M invece di €4.55M → DANNO per l'importatore. Esercita la call se il dollaro si è apprezzato oltre lo strike. Il premio €50.000 è il costo della copertura. NOTA: la domanda è volutamente tranello — la risposta D è corretta nel senso che se €/$ scende sotto 1.05 (dollaro vale più di €0.952), l'importatore preferisce comprare i $ all'opzione."
+            "testo": "Il 'Greek' Delta di un'opzione call vale 0.65. Cosa significa e come varia con il tempo (theta) e la volatilità (vega)?",
+            "opzioni": ["A) Il premio dell'opzione aumenta di €0.65 per ogni €1 di aumento del sottostante — Delta è sempre costante durante la vita dell'opzione",
+                        "B) Δ = 0.65: per ogni €1 di aumento dell'azione, il valore della call aumenta di €0.65. Δ converge a 1 per call deep-in-the-money e a 0 per deep-out-of-money; vega misura la sensibilità al cambiamento della volatilità implicita (vega positivo per opzioni lunghe); theta è il 'time decay' — ogni giorno che passa riduce il valore dell'opzione (theta negativo per le posizioni long options)",
+                        "C) Delta misura la probabilità risk-neutral che l'opzione scada in-the-money alla scadenza",
+                        "D) Delta è sempre 0.5 per le opzioni at-the-money indipendentemente dalla scadenza e dalla volatilità"],
+            "corretta": 1,
+            "spiegazione": "GREEKS — delta hedging e sensibilità: Δ (Delta): variazione del prezzo dell'opzione per €1 di variazione del sottostante. Call Δ ∈ [0,1]; Put Δ ∈ [−1,0]. Δ = 0.65 → la call è leggermente in-the-money. Un delta-hedger neutrale vende 0.65 azioni per ogni opzione call acquistata. Γ (Gamma): tasso di variazione del delta → misura la convexity dell'opzione. Gamma massimo per opzioni ATM. Θ (Theta): time decay — ogni giorno trascorso riduce il valore dell'opzione (le opzioni sono 'deperibili'). Long options: Θ < 0 (perdi tempo-valore ogni giorno). Short options: Θ > 0 (guadagni dal time decay). ν (Vega): sensibilità alla volatilità implicita. Long options: Vega > 0 (beneficiano di più volatilità). Short options: Vega < 0. Ρ (Rho): sensibilità ai tassi di interesse (rilevante per opzioni con lunga scadenza). PUT-CALL PARITY: C − P = S − K×e^(−rT). Relazione fondamentale che lega prezzi call e put — violazioni (rare) sono opportunità di arbitraggio."
           },
           {
-            "domanda": "La Borsa Italiana opera con un sistema 'order-driven' (book degli ordini). La London Stock Exchange usa anche sistemi 'quote-driven' per alcune azioni. Quale è la differenza chiave?",
-            "opzioni": ["A) Nel sistema order-driven ci sono commissioni, nel quote-driven no", "B) Order-driven: gli ordini si incrociano automaticamente nel book (aste); Quote-driven: i market maker quotano continuamente bid/ask e sono la controparte delle transazioni — garantiscono liquidità ma guadagnano sullo spread", "C) Order-driven è per azioni, quote-driven è obbligatorio per i derivati", "D) Order-driven garantisce prezzi migliori, quote-driven è usato solo nei mercati emergenti"],
+            "testo": "Un hedge fund usa un 'variance swap' per posizionarsi sulla volatilità realizzata di Intesa SanPaolo. Paga volatilità fissa del 20% e riceve volatilità realizzata. Se la volatilità realizzata nel periodo è 28%, il payoff del fondo è:",
+            "opzioni": ["A) 28% − 20% = 8% del nozionale",
+                        "B) (28²− 20²) × (Nozionale/Vega notional) = (784 − 400) × vega = 384 × vega. Il payoff si basa su VARIANZA (σ²), non sulla volatilità — il nozionale è in 'variance points'",
+                        "C) (28 − 20)% × nozionale = 8% × nozionale (payoff lineare sulla volatilità)",
+                        "D) Il payoff è zero — la volatilità fissa e quella realizzata si annullano in un variance swap"],
             "corretta": 1,
-            "spiegazione": "Order-driven (auction market): gli ordini di acquisto/vendita degli investitori si incrociano nel book automaticamente. Il prezzo emerge dall'equilibrio domanda/offerta. Nessun intermediario obbligatorio tra le parti. Ampiezza e spessore del mercato dipendono dagli ordini. Quote-driven (dealer market): i market maker (dealer) quotano in modo continuo un bid (prezzo di acquisto) e un ask (prezzo di vendita). Lo spread bid-ask è il loro margine. Garantiscono liquidità immediata anche per titoli poco scambiati. Esempio OTC: forex, derivati, obbligazioni corporate sono quasi sempre quote-driven. La Borsa Italiana (Euronext Milan) usa un sistema misto: order-driven con specialist (market maker ibridi) per le azioni meno liquide. La microstructure dei mercati impatta i costi di transazione degli investitori."
+            "spiegazione": "VARIANCE SWAP — uno degli strumenti più sofisticati del mercato dei derivati: PAYOFF = (σ²_realizzata − K²_var) × Vega_nozionale × (1/2). Il payoff è sulla VARIANZA (σ²), non sulla volatilità (σ). Con σ_realizzata = 28%, K = 20%: σ²_r = 784 (variance points), K² = 400. Payoff = (784 − 400) × Vega = 384 × Vega. VANTAGGI vs Straddle/opzioni: payoff puro sulla volatilità realizzata, senza dover gestire il delta-hedging continuo. Il vega del variance swap è costante (a differenza delle opzioni dove il vega dipende dal moneyness). VOLATILITY vs VARIANCE: il mercato degli strumenti sulla volatilità (VIX, variance swap, vol swap) è cresciuto enormemente: investitori usano la volatilità come asset class. Il VIX (CBOE Volatility Index per S&P500) misura la volatilità implicita ATM a 30 giorni — il 'fear gauge' del mercato. Nel 2008 il VIX ha toccato 80+ (vs media storica ~18-20). Il VVIX (volatilità della volatilità) misura quanto è incerta la volatilità stessa — secondo livello di complessità."
           },
           {
-            "domanda": "In un IRS pay-fixed receive-floating, la banca paga 3% fisso e riceve Euribor 6m + 50bps sul nozionale di €100M. Se l'Euribor sale da 2% a 4%, il mark-to-market dell'IRS per la banca è:",
-            "opzioni": ["A) Negativo — la banca paga di più con tassi più alti", "B) Positivo — ricevere variabile ha valore positivo quando i tassi salgono: la banca riceve ora 4.5% e paga 3% → cash flow netto +€1.5M/anno → il contratto ha valore positivo per la banca", "C) Neutro — l'IRS è un contratto simmetrico, nessuna parte guadagna o perde con i movimenti di tasso", "D) Negativo — l'aumento dei tassi aumenta il valore attuale dei pagamenti fissi futuri"],
+            "testo": "Il trading ad alta frequenza (High-Frequency Trading, HFT) rappresenta ~50-60% del volume azionario nei mercati USA. Qual è il principale beneficio e il principale rischio sistemico?",
+            "opzioni": ["A) Beneficio: profitti per gli HFT trader; Rischio: nessuno — il mercato si auto-regola",
+                        "B) Beneficio: liquidità immediata e spread bid-ask ridotti → minori costi di transazione per gli investitori tradizionali. Rischio: 'flash crash' — cascate di ordini automatici amplificano i movimenti di prezzo con velocità inumana (es. Flash Crash maggio 2010: Dow Jones -1.000 punti in 36 minuti)",
+                        "C) Beneficio: riduzione della volatilità del mercato; Rischio: aumento dei costi di intermediazione per le piccole banche",
+                        "D) Beneficio: prezzi più informativi; Rischio: monopolio del mercato da parte di poche imprese tecnologiche"],
             "corretta": 1,
-            "spiegazione": "Mark-to-Market IRS pay-fixed receive-floating: quando i tassi salgono, il lato ricevuto (variabile) aumenta, il lato pagato (fisso) rimane stabile. Net cash flow diventa positivo: ricevo 4% + 0.5% = 4.5%, pago 3% → +1.5% su €100M = +€1.5M/anno. Il valore dell'IRS è il valore attuale di questi cash flow futuri positivi → MTM positivo (asset per la banca). APPLICAZIONE ALM: una banca con mutui a tasso fisso usa pay-fixed IRS per coprirsi. Quando i tassi salgono: i mutui si svalutano (mark-to-market) ma l'IRS guadagna → copertura efficace. Il NOCCIOLO: receive-floating = scommessa su tassi in salita; pay-fixed = scommessa su tassi in discesa. Le banche scelgono la direzione in base al mismatch del bilancio."
+            "spiegazione": "HFT — dibattito accademico e regolamentare: PRO (benefici): Riduzione degli spread bid-ask: studi mostrano che l'HFT ha ridotto gli spread del 50-80% negli ultimi 20 anni. Maggiore liquidità immediata: ordini enormi vengono assorbiti più velocemente. Price discovery più efficiente: l'arbitraggio di latenza tra mercati diversi mantiene i prezzi allineati. CONTRO (rischi): Flash Crash (6 maggio 2010): un ordine enorme di E-mini S&P500 futures di Waddell & Reed ha innescato una cascata di HFT sell orders → mercato -9% in minuti → rimbalzo completo in 90 minuti. Cause: liquidity withdrawal — gli HFT si ritirano dal mercato nei momenti di stress, quando la liquidità è più necessaria. Front-running: alcuni HFT vedono gli ordini istituzionali in arrivo e si posizionano davanti (tecnicamente legale ma eticamente contestato). REGOLAZIONE: MiFID II ha introdotto obblighi di market making continuativo, circuit breaker automatici, tassa sulle transazioni finanziarie (in discussione UE). La SEC ha introdotto il Consolidated Audit Trail (CAT) per tracciare tutti gli ordini HFT."
           }
         ]
       }
     ]
   },
 
-  # ══════════════════════════════════════════════════════════════
   "intermediari": {
-    "nome": "🏢 Intermediari Non Bancari",
-    "badge": "badge-orange", "emoji": "🏢",
-    "xp_totale": 400,
-    "descrizione": "Assicurazioni, SGR, SIM, leasing, factoring, OICR",
-    "accent": "#fb923c",
+    "nome": "Intermediari Specializzati", "emoji": "◆",
+    "colore": "rust", "accent": "#C4522A",
+    "xp_totale": 550,
+    "desc": "Assicurazioni, SGR/SICAV, SIM, leasing, factoring, private equity",
     "livelli": [
       {
-        "titolo": "M1 — Assicurazioni: Logica e Prodotti",
-        "descrizione": "Ramo vita, ramo danni, pooling del rischio, ALM assicurativo, bancassurance",
-        "xp": 60,
+        "id": "I1", "titolo": "Assicurazioni & Asset Liability Management",
+        "desc": "Ramo vita, ramo danni, riserve tecniche, Solvency II, bancassurance",
+        "xp": 80,
         "domande": [
           {
-            "domanda": "Una compagnia assicurativa raccoglie premi per €10M l'anno da 10.000 assicurati RC Auto. Il sinistro medio è €1.000 con probabilità 5% per assicurato. Qual è la logica attuariale che rende sostenibile il modello?",
-            "opzioni": ["A) La compagnia punta sui propri investimenti per coprire i sinistri — i premi sono solo un servizio accessorio", "B) La Legge dei Grandi Numeri: con 10.000 assicurati, il numero di sinistri effettivi converge alla perdita attesa (500 sinistri × €1.000 = €500K) — la variabilità del portafoglio aggregato è gestibile", "C) La compagnia riassicura tutto il rischio alla riassicurazione, tenendo solo le commissioni", "D) I premi vengono investiti in BTP e i rendimenti finanziano i sinistri senza dover usare i premi stessi"],
+            "testo": "Solvency II (entrata in vigore 2016) ha rivoluzionato la regolamentazione assicurativa europea con un approccio a 3 Pilastri analogo a Basilea. Il Pillar 1 (requisiti quantitativi) introduce il SCR (Solvency Capital Requirement). Come si calcola e cosa copre?",
+            "opzioni": ["A) SCR = 8% delle riserve tecniche — analogo al CET1 bancario",
+                        "B) SCR = capitale necessario per sopravvivere a uno shock 'Value at Risk 99.5% a 1 anno' — copre i rischi di sottoscrizione, di mercato, di credito e operativo; è calcolato con formula standard o modello interno approvato dall'IVASS",
+                        "C) SCR = somma dei premi raccolti nell'anno × coefficiente di rischiosità del ramo",
+                        "D) SCR è un requisito puramente qualitativo — non ha formula quantitativa, è determinato caso per caso dall'IVASS"],
             "corretta": 1,
-            "spiegazione": "Il 'pooling del rischio' è il cuore dell'assicurazione: un singolo non sa se avrà un sinistro (rischio idiosincratico), ma il portafoglio di 10.000 assicurati ha una distribuzione dei sinistri molto prevedibile (LGN). Perdita attesa aggregata: 10.000 × 5% × 1.000 = €500.000. Premio 'equo': €50/assicurato + loading (spese amministrative 20% + utile 10%). Premio commerciale ≈ €65-70. Il loading copre: costi di acquisizione (agenti/broker), spese amministrative, utile per gli azionisti, riserve di prudenza. Il ciclo finanziario assicurativo è INVERSO a quello bancario: si incassa il premio PRIMA di conoscere il costo del sinistro → le riserve tecniche vengono investite → gestione patrimoniale è parte integrante del business model."
+            "spiegazione": "SOLVENCY II — architettura: PILLAR 1: Quantitative requirements. SCR (Solvency Capital Requirement): VaR 99.5% a 1 anno su tutti i rischi combinati (mercato, sottoscrizione vita/danni, credito, operativo). Se il VaR 99.5% = €500M → la compagnia deve avere €500M di fondi propri eligible. MCR (Minimum Capital Requirement) = VaR 85% → soglia di triggering intervention. PILLAR 2: Governance, risk management, ORSA (Own Risk and Solvency Assessment) = analogo dell'ICAAP bancario. PILLAR 3: Reporting e trasparenza (SFCR — Solvency and Financial Condition Report pubblico). NOVITÀ CHIAVE vs. Solvency I: approccio mark-to-market per le riserve tecniche (Best Estimate + Risk Margin) vs. approccio prudenziale statico di Solvency I. Gli attivi sono valorizzati al fair value → le compagnie assicurative sono diventate molto più sensibili ai movimenti dei tassi (l'ALM è diventato centrale). Il rialzo dei tassi BCE 2022-2023 ha MIGLIORATO la solvency ratio delle compagnie vita perché ha ridotto il valore delle riserve tecniche (passivo) più di quanto non riducesse gli attivi obbligazionari — effetto duration mismatch favorevole per le assicurazioni con passivo a lunga duration."
           },
           {
-            "domanda": "Intesa Sanpaolo distribuisce polizze vita unit-linked attraverso le proprie filiali (bancassurance). Quale è il principale vantaggio e rischio di questo modello?",
-            "opzioni": ["A) Vantaggio: le polizze unit-linked rendono come i BTP con garanzia del capitale; Rischio: la banca non ha esperienza assicurativa", "B) Vantaggio: la banca sfrutta la rete distributiva esistente (cross-selling) e la fiducia del cliente → bassi costi di acquisizione; Rischio: conflitto di interesse (incentivo a vendere prodotti della casa più redditizi per la banca anziché quelli più adatti al cliente — misselling)", "C) Vantaggio: le polizze vita riducono il rischio di credito della banca; Rischio: volatilità dei mercati azionari impatta i depositi", "D) Non ci sono rischi: la bancassurance è regolata dalla BCE che garantisce la correttezza dei prodotti offerti"],
+            "testo": "Un fondo pensione a prestazione definita (Defined Benefit, DB) ha obbligazioni future verso i pensionati con duration 20 anni e un portafoglio obbligazionario con duration 8 anni. Quale rischio di tasso affronta e come si copre?",
+            "opzioni": ["A) Il fondo rischia di guadagnare troppo se i tassi scendono — le obbligazioni in portafoglio si apprezzano",
+                        "B) Il fondo ha un duration gap negativo: duration attivi (8) < duration passivi (20). Se i tassi scendono: il valore delle obbligazioni pensionistiche (passivo) sale molto più degli attivi → funding ratio si deteriora. Si copre allungando la duration degli attivi (LDI — Liability Driven Investment) tramite IRS receiver-fixed o zero coupon bonds a lunghissima scadenza",
+                        "C) Il fondo non è esposto al rischio di tasso perché i rendimenti obbligazionari e le obbligazioni pensionistiche variano nella stessa direzione",
+                        "D) Il rischio è solo inflazionistico — le pensioni sono indicizzate all'inflazione, quindi occorre coprirsi con BTPi"],
             "corretta": 1,
-            "spiegazione": "La bancassurance (Intesa SP Vita, Generali-Mediobanca) è uno dei fenomeni più rilevanti del sistema finanziario italiano: 70%+ delle polizze vita sono distribuite da banche. Vantaggi: Cross-selling efficiente, costi di acquisizione 40-60% inferiori ai canali tradizionali, fidelizzazione del cliente, fees commissionale stabili per la banca (riducendo la dipendenza dal NIM). Sinergie informative: la banca conosce i bisogni finanziari del cliente. RISCHI: Misselling — vendita di prodotti non adatti al profilo di rischio (numerosi casi di polizze index-linked con capitale non garantito vendute a anziani). MiFID II e IDD (Insurance Distribution Directive) hanno imposto suitability assessment obbligatori e disclosure dei costi (KID — Key Information Document). Le multe IVASS per misselling assicurativo sono state significative."
-          },
-          {
-            "domanda": "Il leasing finanziario su un macchinario da €200.000 (durata 5 anni, maxicanone 20%, canone mensile €3.000) è preferito al mutuo bancario da molte PMI perché:",
-            "opzioni": ["A) Il leasing è sempre più economico del mutuo — i canoni sono necessariamente inferiori alle rate del mutuo", "B) Il leasing non richiede l'iscrizione dell'immobile nel bilancio (se non IAS), deduce i canoni fiscalmente, permette l'aggiornamento tecnologico senza proprietà, e il maxicanone migliora il cash flow nella fase di crescita", "C) Il leasing non richiede istruttoria creditizia — è accessibile anche a imprese senza merito creditizio", "D) I canoni di leasing non vengono riportati nella Centrale dei Rischi, mantenendo pulito il 'rating' della PMI"],
-            "corretta": 1,
-            "spiegazione": "VANTAGGI DEL LEASING FINANZIARIO per le PMI: (1) Fiscalità: i canoni di leasing sono deducibili INTEGRALMENTE come costo operativo (IRES e IRAP) — vs il mutuo dove si deduce solo la quota interessi. (2) Bilancio: sotto i principi italiani (OIC), il macchinario rimane fuori dal bilancio del locatario → non deteriora il rapporto debt/equity. Sotto IAS/IFRS (IFRS 16): il locatario deve iscrivere il right-of-use asset e la lease liability — effetto neutro sulla leva. (3) Opzione di riscatto: flessibilità di acquisire o restituire il bene a fine contratto. (4) Preserva le linee di credito: il leasing non 'occupa' il fido bancario. RISCHI: il locatario non è proprietario, rischio del bene rimane al locatario (manutenzione), costo totale spesso superiore all'acquisto diretto."
+            "spiegazione": "LDI (Liability Driven Investment) — strategia dei fondi pensione DB: il problema classico: passivi (future pensioni) hanno duration 15-25 anni; un tipico portafoglio obbligazionario ha duration 5-8 anni → DURATION GAP = D_attivi − D_passivi < 0. Quando i tassi scendono di 1%: Passivi aumentano di ~20% (duration 20 × 1%). Attivi aumentano di ~8% (duration 8 × 1%). Funding ratio = Attivi/Passivi scende. CRISI UK OTT 2022: la Bank of England ha alzato i tassi velocemente → i fondi pensione DB con LDI estrategies che usavano IRS e gilt come collaterale hanno ricevuto margin calls devastanti (i gilt si erano svalutati rapidamente) → vendita forzata di gilt → spiral → BoE ha dovuto intervenire comprando gilt di emergenza. SOLUZIONE LDI: aggiungere receiver IRS lunghi (ricevono il tasso fisso: quando i tassi scendono, l'IRS si apprezza compensando la perdita dei passivi), o comprare zero coupon bond 30 anni. Il compromesso: allocare parte del portafoglio al 'performance portfolio' (azioni, credito) per generare rendimento e parte al 'liability matching portfolio'."
           }
         ]
       },
       {
-        "titolo": "M2 — SGR, Fondi, SICAV ed ETF",
-        "descrizione": "Fondi aperti/chiusi, OICVM, FIA, NAV, commissioni, gestione attiva vs passiva",
-        "xp": 100,
+        "id": "I2", "titolo": "Fondi, SGR, Private Equity e ETF",
+        "desc": "Gestione attiva vs passiva, performance, smart beta, private equity lifecycle",
+        "xp": 110,
         "domande": [
           {
-            "domanda": "Il NAV (Net Asset Value) di un fondo comune aperto si calcola giornalmente come: Attività totali del fondo – Passività / Numero di quote in circolazione. Se il NAV è €6.236, un investitore vuole riscattare 2.500 quote. Quanto riceve?",
-            "opzioni": ["A) €15.000 — prezzo di sottoscrizione originale", "B) €15.590 — calcolato come 2.500 × €6.236, al NAV corrente", "C) €14.250 — al netto di una commissione di uscita del 5%", "D) Dipende dal prezzo di mercato del fondo: i fondi aperti sono quotati in borsa come le azioni"],
+            "testo": "La 'persistenza della performance' dei fondi attivi è il principale argomento a favore della gestione attiva. I dati storici (Carhart 1997, S&P SPIVA) mostrano invece che:",
+            "opzioni": ["A) Il 70-80% dei fondi attivi batte il benchmark nel lungo periodo (10 anni) — la selezione del gestore è cruciale",
+                        "B) La maggioranza dei fondi attivi non batte il benchmark al netto delle commissioni nel lungo periodo (10 anni: ~80-90% dei fondi USA azionari sottoperforma l'S&P500 al netto dei costi); la performance passata non è un buon predittore di quella futura",
+                        "C) I fondi attivi battono sistematicamente in mercati volatili e sottoperformano in mercati stabili",
+                        "D) I fondi attivi battono il benchmark nei mercati emergenti ma non nei mercati sviluppati — è coerente con l'EMH"],
             "corretta": 1,
-            "spiegazione": "I fondi comuni aperti si sottoscrivono e riscattano al NAV: Rimborso = quote × NAV = 2.500 × 6.236 = €15.590. Questo è il prezzo 'equo' — non è un prezzo di mercato negoziato ma calcolato dalla SGR (o dalla banca depositaria) su base quotidiana. DIFFERENZA FONDAMENTALE tra fondi aperti e chiusi: Fondi aperti (OICVM tipici): sottoscrizioni/rimborsi in qualsiasi giorno lavorativo al NAV. Liquidità garantita dalla SGR che vende asset. Fondi chiusi (FIA): numero quote fisso, quotati in borsa a prezzo di mercato (può differire dal NAV). Tipici per asset illiquidi: private equity, real estate, infrastrutture. La SICAV (Société d'Investissement à Capital Variable) è la struttura societaria equivalente al fondo aperto — quota è azione della SICAV, diffusa nei fondi lussemburghesi (es. prodotti Fidelity, Blackrock distribuiti in Italia)."
+            "spiegazione": "GESTIONE ATTIVA vs PASSIVA — il grande dibattito della finanza: DATI SPIVA (S&P Indices vs Active): su 10 anni, ~85-90% dei fondi azionari USA large cap attivi sottoperforma l'S&P500 al netto delle commissioni. MATEMATICA DEL ZERO-SUM GAME (Sharpe 1991): prima dei costi, il rendimento medio di tutti i gestori attivi DEVE essere uguale al rendimento del mercato (i gestori attivi sono il mercato). Dopo i costi (commissioni 0.8-1.5%/anno per i fondi attivi vs 0.05-0.1% per ETF), la media dei gestori attivi DEVE sottoperformare il mercato per via della commissione. ECCEZIONI: alcuni segmenti dove i gestori attivi aggiungono valore: small cap, mercati emergenti, credito illiquido (meno efficienti). PRIVATE EQUITY: non è un fondo pubblico — investe in aziende private con lockup 7-10 anni, usa leva, ottiene controllo gestionale → può veramente aggiungere valore operativo. I migliori PE (KKR, Blackstone) hanno generato alpha persistente, ma l'accesso è riservato agli istituzionali. ETF rivoluzione: dal 1993 (primo SPDR S&P500) → oggi >$10 trilioni di AUM in ETF globali. In Italia la quota dei fondi passivi è ~20% dell'industria (vs ~50% USA), ma cresce rapidamente."
           },
           {
-            "domanda": "La differenza tra OICVM (organismi di investimento collettivo in valori mobiliari) e FIA (fondi di investimento alternativi) è rilevante perché:",
-            "opzioni": ["A) Gli OICVM possono essere venduti solo a investitori istituzionali, i FIA ai retail", "B) Gli OICVM sono soggetti a regole stringenti di diversificazione e liquidità (UCITS Directive) → possono essere distribuiti a qualsiasi investitore UE; i FIA (hedge fund, PE, real estate) hanno meno restrizioni ma sono riservati tipicamente a investitori qualificati/professionali", "C) Gli OICVM investono solo in titoli italiani, i FIA possono investire globalmente", "D) I FIA sono esentasse mentre gli OICVM scontano la ritenuta del 26% sui rendimenti"],
+            "testo": "Un fondo di Private Equity (PE) acquista un'azienda manifatturiera (target) con LBO (Leveraged Buyout): acquisto €200M, equity del PE = €60M, debito bancario = €140M. EBITDA target = €20M, multiplo di acquisto = 10× EV/EBITDA. Dopo 5 anni vuole uscire con EV = €280M e debito residuo = €80M. Qual è il MOIC (Multiple on Invested Capital)?",
+            "opzioni": ["A) MOIC = 1.4× — calcolato come EV finale / EV iniziale = 280/200",
+                        "B) MOIC = EV finale − Debito residuo / Equity iniziale = (280 − 80) / 60 = 200 / 60 = 3.3× — il PE riceve il valore dell'equity (EV meno debito) dividendo per l'equity investito inizialmente",
+                        "C) MOIC = 5× — il PE ha quintuplicato l'EBITDA da 20M a 100M",
+                        "D) MOIC = 2× — calcolato come (EV finale / EV iniziale) × (debito iniziale / debito residuo)"],
             "corretta": 1,
-            "spiegazione": "UCITS (Undertakings for Collective Investment in Transferable Securities — recepita in Italia come OICVM): framework europeo armonizzato dal 1985. Regole: diversificazione (no più del 10% in un singolo emittente, no più del 40% in emittenti con peso >5%), liquidità (solo attivi liquidi negoziati su mercati regolamentati), leva limitata, derivati solo per copertura. Distribuibili al retail in tutta l'UE con 'passaporto UCITS'. FIA (AIFMD, 2011): hedge fund, fondi PE, fondi immobiliari, fondi infrastrutture. Possono assumere più rischio e illiquidità. Distribuibili di default solo a investitori professionali (>€500K) salvo apposita autorizzazione per retail. In Italia la Banca d'Italia autorizza le SGR; CONSOB vigila sulla distribuzione. Il mercato italiano dei fondi è dominato da OICVM di diritto lussemburghese/irlandese distribuiti da banche italiane."
-          },
-          {
-            "domanda": "Un'azienda di abbigliamento cede al factor €2M di crediti commerciali verso grande distribuzione (scadenza 90 giorni) con operazione pro-soluto. Il factor applica tasso di finanziamento 5% annuo e commissione factoring 0.8%. L'azienda riceve circa:",
-            "opzioni": ["A) €2.000.000 — la cessione pro-soluto è senza rivalsa, l'azienda riceve tutto", "B) Anticipo circa 80% = €1.6M subito, meno interessi e commissioni; il factor gestisce l'incasso e si assume il rischio insolvenza del debitore ceduto", "C) €2M meno solo la commissione factoring: €2M × (1-0.8%) = €1.984M", "D) €1.946M — calcolato come €2M × (1 - 5%×(90/365) - 0.8%) = €2M × (1 - 1.23% - 0.8%)"],
-            "corretta": 3,
-            "spiegazione": "Factoring pro-soluto: il factor acquista definitivamente i crediti assumendosi il rischio di insolvenza del debitore (non c'è rivalsa sull'azienda cedente). Il costo si compone di: Costo finanziario: 5% × (90/365) = 1.23% → €24.600 Commissione factoring: 0.8% × €2M = €16.000 Totale costo = €40.600 Anticipo = €2M - €40.600 = ~€1.959M (≈ risposta D con leggera approssimazione). PRO-SOLUTO vs PRO-SOLVENDO: Pro-soluto — il factor si assume il rischio di credito (più costoso ma l'azienda cede il rischio definitivamente). Pro-solvendo — in caso di insolvenza del debitore, il factor ha rivalsa sull'azienda cedente (meno costoso). Il factoring migliora il capitale circolante: trasforma crediti a 90gg in liquidità immediata, utile per le PMI con ciclo del circolante lungo."
+            "spiegazione": "LBO RETURNS — tre driver di valore nel PE: MOIC = (EV_exit − Debt_residuo) / Equity_investito = (280 − 80) / 60 = 3.3×. Per convertire in IRR: 60 → 200 in 5 anni: IRR = (200/60)^(1/5) − 1 = 3.33^0.2 − 1 ≈ 27% annuo. LE TRE FONTI DI VALORE IN UN LBO: (1) LEVERAGE: il debito amplifica il rendimento dell'equity (effet levier). Con EV da 200 a 280 = +40%; ma equity da 60 a 200 = +233%. La leva finanziaria moltiplica il rendimento dell'equity. (2) MULTIPLO EXPANSION: se EV/EBITDA all'uscita > all'entrata (es. acquisizione a 10×, uscita a 14×) → pura 'financial engineering'. (3) CRESCITA OPERATIVA: miglioramento dell'EBITDA tramite ottimizzazione costi, crescita ricavi, M&A bolt-on. Un buon PE genera alpha attraverso (3), non solo (1) e (2). DPI (Distributions to Paid-In) e TVPI (Total Value to Paid-In) sono le metriche standard del PE; il MOIC è un proxy semplificato. Commissioni PE: management fee 2% del committed capital + carried interest 20% sul profitto sopra l'hurdle rate (tipicamente 8%)."
           }
         ]
       },
       {
-        "titolo": "M3 — BOSS: Business Model e Modelli Organizzativi",
-        "descrizione": "⚔️ BOSS — Retail vs Corporate vs Investment banking, banca universale, BCE classification",
-        "xp": 160, "boss": True,
+        "id": "I3", "titolo": "◈ BOSS — Business Model Avanzati",
+        "desc": "⚔ BCE business model classification, banca universale, neobank, fintech disruption",
+        "xp": 200, "boss": True,
         "domande": [
           {
-            "domanda": "La BCE classifica i modelli di business bancari europei. Una banca 'focused retail' come Mediolanum ha caratteristiche diverse da una banca 'wholesale' come Deutsche Bank. Quale KPI li distingue meglio?",
-            "opzioni": ["A) Il ROE — la banca retail ha sempre ROE più alto", "B) Il Loans-to-Deposits ratio (LtD): la retail bank ha LtD < 1 (raccoglie più depositi che presta), la wholesale bank ha LtD > 1 (finanzia i prestiti sul mercato interbancario/obbligazionario)", "C) Il CET1 ratio — le banche wholesale hanno sempre più capitale delle retail", "D) Il numero di filiali — le banche wholesale ne hanno di più per servire la clientela corporate"],
+            "testo": "I neobank (Revolut, N26, Bunq) hanno un costo di acquisizione cliente (CAC) molto più basso delle banche tradizionali grazie al modello digitale. Qual è il loro principale tallone d'Achille strutturale?",
+            "opzioni": ["A) Non possono concedere prestiti — la normativa vieta ai neobank di fare attività creditizia",
+                        "B) Il 'deposit stickiness' è molto più bassa rispetto alle banche tradizionali: i clienti dei neobank cambiano app con facilità (switching cost quasi zero) → funding instabile. Inoltre il LTV (Lifetime Value) del cliente è basso perché non c'è la 'relazione di filiale' che genera cross-selling → difficoltà a monetizzare oltre i pagamenti",
+                        "C) I neobank non hanno accesso al sistema di pagamenti europeo (SEPA) — devono appoggiarsi alle banche tradizionali",
+                        "D) I neobank pagano tassi di interesse sui depositi molto più alti delle banche tradizionali riducendo il NIM"],
             "corretta": 1,
-            "spiegazione": "L'LtD ratio (Loan-to-Deposit) cattura la struttura del funding: LtD < 80-90%: banca prevalentemente retail, con raccolta di depositi che supera i prestiti → funding stabile e autosufficiente. LtD > 100%: la banca finanzia i prestiti anche con raccolta wholesale (bond, interbancario) → più vulnerabile alle crisi di liquidità (credit crunch). Nel 2008 le banche wholesale europee con LtD > 130% subirono lo shock peggiore del mercato interbancario congelato. La classificazione BCE identifica anche: Corporate (prevalenza di prestiti alle grandi imprese), Investment (trading, M&A, capital markets), Custodian (custodia titoli), Private (wealth management). UniCredit è 'complex commercial': mix di tutto. Mediolanum è 'focused retail': prevalenza depositi/fondi. MPS è tradizionale 'retail': alta dipendenza depositi, alta esposizione NPL locale."
+            "spiegazione": "NEOBANK ECONOMICS — modello di business e vulnerabilità: VANTAGGI: CAC 10-50€ vs 200-400€ delle banche tradizionali (nessuna filiale, acquisizione via app/social). Costo operativo per transazione bassissimo (full automation). UX superiore, funzionalità innovative (multi-currency, crypto, round-up savings). PROBLEMI STRUTTURALI: (1) Revenue per customer basso: un cliente Revolut genera ~€15-20/anno vs €300-500/anno per un cliente bancario tradizionale con mutuo, assicurazioni, investimenti. (2) Profittabilità lontana: Revolut ha raggiunto la profittabilità solo nel 2021 dopo 6 anni — molti neobank continuano a bruciare cassa. (3) Credito: i neobank entrano nel credito (Revolut Pay Later, N26 Credit) ma soffrono dell'assenza di soft information → rischi di adverse selection. (4) Regolamentazione: ottenere una licenza bancaria completa (Revolut UK la ha ottenuta solo nel 2024 dopo anni di attesa) è costoso e limita la scalabilità. (5) Concentrazione di clienti: il cliente 'young urban digital' diventa più esigente e multi-banking con l'età → il valore del cliente cresce ma il neobank potrebbe non catturarlo."
           },
           {
-            "domanda": "Il Risk Appetite Framework (RAF) di una banca definisce i concetti di 'risk appetite', 'risk tolerance' e 'risk capacity'. Quale gerarchia è corretta?",
-            "opzioni": ["A) Risk capacity > risk appetite > risk tolerance — la banca NON vuole assumere tutto il rischio che potrebbe tecnicamente assumere", "B) Risk tolerance > risk capacity > risk appetite — si tollera sempre più rischio di quanto si è capaci di gestire", "C) Risk appetite = risk capacity = risk tolerance — sono tre modi per dire la stessa cosa", "D) Risk capacity è sempre zero nelle banche well-managed"],
+            "testo": "Il 'modello di banca universale' (UniCredit, BNP Paribas, Deutsche Bank) integra retail, corporate e investment banking. Qual è il principale beneficio regolamentare del subholding/subsidiaries model vs il branch model?",
+            "opzioni": ["A) Le subsidiary hanno capitale separato e possono fallire in modo ordinato (resolution) senza contagiare l'intera holding — la 'ring-fencing' protegge la banca commerciale dall'investment banking più rischioso",
+                        "B) Le subsidiary pagano meno tasse rispetto ai branch perché sono entità legali indipendenti",
+                        "C) Le subsidiary possono applicare standard contabili diversi (GAAP invece di IFRS) riducendo il capitale richiesto",
+                        "D) Le subsidiary non sono soggette alla vigilanza BCE — solo la holding è supervisionata dal MVU"],
             "corretta": 0,
-            "spiegazione": "Il RAF (Risk Appetite Framework, introdotto da FSB post-2008) struttura la governance del rischio su tre livelli: Risk Capacity (limite massimo assoluto): quanto rischio la banca PUÒ assumere prima di violare i requisiti regolamentari (CET1 min, LCR min). Risk Appetite (target strategico): quanto rischio la banca VUOLE assumere in coerenza con il business plan e il modello di business — tipicamente un CET1 target superiore al minimo regolamentare per avere buffer. Risk Tolerance (soglia di allerta): variazione accettabile attorno al risk appetite — oltre questa soglia scattano azioni correttive. La gerarchia: Capacity > Appetite > Tolerance (margin). Il CRO (Chief Risk Officer) monitora che l'operatività rimanga nei limiti del RAF. Il Consiglio di Amministrazione approva il RAF annualmente."
+            "spiegazione": "STRUTTURA ORGANIZZATIVA BANCARIA — holding vs branch: BRANCH model: un'unica entità legale che opera in tutti i mercati tramite filiali. Vantaggi: efficienza del capitale (un unico pool), semplicità operativa. Svantaggio: un problema in una divisione si propaga a tutto il gruppo (no ring-fencing). SUBSIDIARY model: ogni divisione/paese è un'entità legale separata con proprio capitale. Vantaggio chiave: RESOLUTION PLANNING — la BRRD richiede piani di risoluzione credibili. Con le subsidiary, il Resolution Authority può chiudere/cedere singole entità senza abbattere il gruppo intero. Il ring-fencing delle attività retail (proposto in UK dalla Vickers Report → implementato dal 2019) separa obbligatoriamente la banca commerciale (depositi retail, prestiti PMI) dall'investment banking → protegge i depositanti retail dal rischio delle attività di trading. In Italia il D.Lgs. 16/2015 ha implementato la BRRD. UniCredit ha adottato il 'One UniCredit' model (2022): semplificazione della struttura sub-holding per ridurre complessità e costo di funding. Il trade-off rimane: efficienza del capitale (branch) vs resolution readiness (subsidiary)."
           }
         ]
       }
     ]
   },
 
-  # ══════════════════════════════════════════════════════════════
   "rischio": {
-    "nome": "⚠️ Rischio & Regolamentazione",
-    "badge": "badge-red", "emoji": "⚠️",
-    "xp_totale": 500,
-    "descrizione": "Rischi bancari, Basilea III, vigilanza europea, stress test",
-    "accent": "#fc8181",
+    "nome": "Rischio & Regolamentazione", "emoji": "◐",
+    "colore": "rust", "accent": "#C4522A",
+    "xp_totale": 650,
+    "desc": "Rischi bancari, Basilea IV, vigilanza SSM, stress test EBA, governance",
     "livelli": [
       {
-        "titolo": "M1 — Tipologie di Rischio e Misurazione",
-        "descrizione": "VaR, Expected Shortfall, Gap di tasso, rischio operativo, rischio sistemico",
-        "xp": 70,
+        "id": "R1", "titolo": "Tassonomia e Misurazione dei Rischi",
+        "desc": "VaR, ES, gap analysis, rischio operativo, ESG risk, rischio sistemico",
+        "xp": 90,
         "domande": [
           {
-            "domanda": "La 'Gap Analysis' del rischio di tasso: una banca ha attività sensibili ai tassi (RSA) per €80M e passività sensibili (RSL) per €100M nell'intervallo 1-12 mesi. Il gap è -€20M. Se i tassi salgono di 100 bps (1%), l'impatto sul margine di interesse è:",
-            "opzioni": ["A) +€200.000 — il gap positivo beneficia del rialzo dei tassi", "B) -€200.000 — con gap negativo (RSL > RSA), un rialzo dei tassi aumenta più i costi della raccolta che i ricavi sugli impieghi: ΔNI = gap × Δi = -20M × 1% = -€200K", "C) +€800.000 — basato solo sulle attività sensibili: 80M × 1%", "D) Zero — un rialzo dei tassi ha effetto simmetrico su attivo e passivo"],
+            "testo": "L'Expected Shortfall (ES, o CVaR) al 97.5% è preferito al VaR 99% da Basilea IV per il trading book. Perché è considerato superiore?",
+            "opzioni": ["A) L'ES è più facile da calcolare — richiede meno dati storici del VaR",
+                        "B) L'ES misura la PERDITA MEDIA nella coda della distribuzione (il 2.5% peggiore dei casi), mentre il VaR indica solo la soglia superata in quel 2.5% dei casi — l'ES è 'coerente' (soddisfa la sub-additività) e cattura meglio il fat tail risk tipico dei mercati finanziari",
+                        "C) L'ES al 97.5% è matematicamente equivalente al VaR 99% — usano la stessa soglia di confidenza",
+                        "D) L'ES è preferito perché può essere calcolato in tempo reale senza modelli statistici complessi"],
             "corretta": 1,
-            "spiegazione": "Gap Analysis: ΔNII = (RSA - RSL) × Δi = Gap × Δi. Gap = RSA - RSL = 80M - 100M = -20M (gap negativo = liability-sensitive). Con Δi = +1%: ΔNII = -20M × 0.01 = -€200.000. Il margine di interesse scende perché la banca ha più passività sensibili (es. depositi a tasso variabile, interbancario a breve) che attività sensibili (es. impieghi a tasso variabile). SOLUZIONE: usare IRS pay-fixed receive-floating per trasformare la raccolta da variabile a fissa, eliminando il gap. La Gap Analysis è semplificata: non considera la convessità, i floor sui tassi, le opzioni implicite nei mutui (rimborso anticipato). L'IRRBB (Interest Rate Risk in the Banking Book) di Basilea misura questo rischio con scenari di stress sui tassi."
+            "spiegazione": "VaR vs EXPECTED SHORTFALL — il dibattito tecnico: VaR al 99%: 'qual è la perdita massima che non supero nel 99% dei casi?' → indica la SOGLIA ma non dice QUANTO si perde oltre quella soglia. ES (Expected Shortfall) al 97.5%: 'qual è la perdita MEDIA nel 2.5% dei casi peggiori?' → cattura l'intera distribuzione della coda. ESEMPIO: due portafogli con lo stesso VaR 99% = €10M: Portfolio A: nel 1% dei casi peggiori, perde sempre €11M (coda corta). Portfolio B: nel 1% dei casi peggiori, perde tra €10.5M e €500M (coda pesante). Il VaR non distingue tra A e B. L'ES sì: ES(A) ≈ €11M, ES(B) >> €50M. SUB-ADDITIVITÀ: l'ES soddisfa ES(A+B) ≤ ES(A)+ES(B) (la diversificazione riduce il rischio) — il VaR viola questa proprietà in alcuni casi. FRTB (Fundamental Review of Trading Book — Basilea IV): sostituisce il VaR 99% con ES 97.5% su scenari di stress (250 giorni storici nel periodo di stress più severo nell'ultimo decennio). Cambiamento significativo per le banche con grandi trading book."
           },
           {
-            "domanda": "Il caso Barings Bank (1995): Nick Leeson accumulò perdite di £1.3 miliardi in futures Nikkei operando dalla sede di Singapore, portando al fallimento la banca. Quale tipologia di rischio è preponderante?",
-            "opzioni": ["A) Rischio di mercato puro: la caduta del Nikkei causò le perdite", "B) Rischio operativo nella sua manifestazione più grave: frode interna, inadeguatezza dei controlli interni, assenza di segregazione tra front e back office — Leeson era sia trader che responsabile delle operazioni di back office", "C) Rischio di credito: le controparti dei futures non onorarono i contratti", "D) Rischio strategico: la banca aveva scelto di operare in derivati senza adeguata competenza"],
+            "testo": "I rischi ESG (Environmental, Social, Governance) nel banking sono diventati materia di vigilanza prudenziale dalla BCE (Guide on Climate-Related Risks, 2020). Come si manifestano come rischio di CREDITO per una banca?",
+            "opzioni": ["A) Le banche che finanziano imprese inquinanti ricevono direttamente multa dalla BCE proporzionale alle emissioni",
+                        "B) Rischio fisico: i debitori in zone ad alto rischio climatico (inondazioni, siccità) subiscono danni agli asset che riducono la capacità di rimborso → NPL aumentano. Rischio di transizione: i debitori in settori ad alte emissioni (oil & gas, cemento, automotive ICE) subiscono svalutazione degli asset stranded → perdita di valore del collaterale. Entrambi aumentano PD e LGD",
+                        "C) I rischi ESG sono solo reputazionali — non impattano le perdite effettive su crediti",
+                        "D) I rischi ESG si materializzano solo per le banche che non hanno una policy ESG — le banche con rating ESG alto sono immuni"],
             "corretta": 1,
-            "spiegazione": "Barings è il caso-scuola del rischio operativo (Basilea III definizione: 'perdite derivanti dall'inadeguatezza o disfunzione di processi interni, risorse umane, sistemi o eventi esterni'). Il disastro fu possibile per: (1) Assenza di segregation of duties: Leeson controllava sia le posizioni che le registrazioni contabili → poteva nascondere le perdite nel conto 'Errori' 88888. (2) Mancanza di supervisione da Londra. (3) Controlli interni inadeguati. (4) Incentivi distorti: Leeson generava 'profitti' che nessuno verificava. Altri casi emblematici: Société Générale (Kerviel, €4.9B, 2008), JPMorgan 'London Whale' ($6.2B, 2012). Dopo il 2008 Basilea III ha rafforzato i requisiti per il rischio operativo con Advanced Measurement Approach e il nuovo SMA (Standardised Measurement Approach) di Basilea IV."
-          },
-          {
-            "domanda": "Il rischio sistemico si distingue dal rischio idiosincratico perché:",
-            "opzioni": ["A) Il rischio sistemico colpisce solo le banche di grandi dimensioni, il rischio idiosincratico le banche piccole", "B) Il rischio sistemico è il rischio che il fallimento di un partecipante causi il fallimento a cascata di altri per effetto delle interconnessioni: non si diversifica con il portafoglio, richiede intervento pubblico/regolamentazione", "C) Il rischio sistemico può essere eliminato con una buona diversificazione del portafoglio di prestiti", "D) Il rischio idiosincratico è più pericoloso per la stabilità finanziaria globale"],
-            "corretta": 1,
-            "spiegazione": "Il rischio sistemico (too-big-to-fail, too-connected-to-fail, too-many-to-fail) ha caratteristiche uniche: Non diversificabile: colpisce tutto il sistema simultaneamente. Esternalità negative: il fallimento di una banca impone costi a terzi (credit crunch all'economia reale). Pro-ciclicità: la regolamentazione e i comportamenti amplificano i cicli (deleveraging forzato nelle crisi). Interconnessioni: rete interbancaria, esposizioni ai mercati, uso di collaterale comune. MISURE: BCBS identifica le G-SIB (Global Systemically Important Banks) con requisiti aggiuntivi di capitale (1-3.5% CET1 su-buffer). In Europa l'ESRB monitora il rischio macroprudenziale. OSII (Other Systemically Important Institutions) sono le banche rilevanti nazionali (in Italia: UniCredit, Intesa, Mediobanca)."
+            "spiegazione": "RISCHI CLIMATICI NEL BANKING — due categorie: (1) RISCHIO FISICO: Acuto — eventi estremi (uragani, alluvioni, siccità). Cronico — cambiamenti permanenti (innalzamento mari, desertificazione). Come impatta il credito: un'impresa agricola colpita da siccità → perdita di fatturato → incapacità di rimborsare → NPL. Un immobile in zona costiera a rischio allagamento → svalutazione del collaterale → LGD più alta se il debitore defaulta. (2) RISCHIO DI TRANSIZIONE: la decarbonizzazione (tasse carbonio, normative, cambiamento consumi) svaluta gli 'stranded assets' (impianti fossili che perdono valore prima del previsto). Le banche con grandi portafogli verso settori 'brown' (oil & gas, coal, automotive ICE) hanno esposizioni che potrebbero deteriorarsi. STRESS TEST CLIMA BCE: nel 2022 la BCE ha condotto il primo climate stress test: ~60% delle 100+ banche supervisionate avevano esposizione significativa a rischi climatici, con perdite stimate nell'ordine di €70-80 mld in scenari avversi. Implicazioni: le banche stanno sviluppando metodologie di 'green-washing due diligence' e portafogli allineati agli obiettivi di Parigi."
           }
         ]
       },
       {
-        "titolo": "M2 — Governance e Risk Management",
-        "descrizione": "Tre linee di difesa, ICAAP, ILAAP, RAF, CRO, compliance",
-        "xp": 100,
+        "id": "R2", "titolo": "Governance e Vigilanza Europea",
+        "desc": "SSM, SREP, Banking Union, BRRD, bail-in, stress test EBA, Basilea IV",
+        "xp": 130,
         "domande": [
           {
-            "domanda": "Il modello 'Three Lines of Defence' (tre linee di difesa) nella governance del rischio bancario prevede:",
-            "opzioni": ["A) Prima linea: Internal Audit; Seconda linea: Risk Management; Terza linea: Business units", "B) Prima linea: Business units (operano e gestiscono il rischio quotidianamente); Seconda linea: Risk Management e Compliance (controllano la prima linea); Terza linea: Internal Audit (valuta indipendentemente l'intero sistema)", "C) Prima linea: BCE; Seconda linea: EBA; Terza linea: Banca d'Italia — i tre livelli di regolamentazione europea", "D) Prima linea: Azionisti; Seconda linea: CdA; Terza linea: Management — la struttura di corporate governance"],
+            "testo": "L'Unione Bancaria Europea si fonda su tre pilastri. Il Terzo Pilastro — EDIS (European Deposit Insurance Scheme) — non è ancora completamente operativo. Quale è il principale ostacolo politico?",
+            "opzioni": ["A) La BCE si è opposta all'EDIS perché ridurrebbe la sua autonomia nella gestione delle crisi bancarie",
+                        "B) I paesi con sistemi bancari 'virtuosi' (es. Germania, Paesi Bassi) temono di dover sussidiare paesi con banche più deboli e molti NPL (es. Italia del 2015-16) — mancanza di condivisione del rischio prima della condivisione dell'assicurazione (risk-reduction before risk-sharing)",
+                        "C) L'EDIS è già pienamente operativo dal 2022 — protegge i depositi fino a €200.000",
+                        "D) La Corte di Giustizia UE ha dichiarato l'EDIS incompatibile con i trattati europei nel 2019"],
             "corretta": 1,
-            "spiegazione": "Il framework delle tre linee di difesa (IIA — Institute of Internal Auditors, aggiornato 2020): 1ª linea (Business/Operations): le unità operative (credito, trading, retail) che generano il rischio. Hanno la responsabilità primaria di identificare e gestire i rischi nelle loro attività quotidiane. 2ª linea (Risk Management + Compliance): funzioni indipendenti che definiscono le politiche di rischio, monitorano il rispetto del RAF, vigilano sulla conformità normativa. Non operano in proprio. 3ª linea (Internal Audit): assurance indipendente sull'adeguatezza dell'intero sistema dei controlli. Riferisce direttamente al CdA. In Italia la Banca d'Italia ha rafforzato questi requisiti con le Disposizioni di Vigilanza su 'Sistema dei controlli interni' (Circ. 285/2013). Il CRO (Chief Risk Officer) guida la 2ª linea e ha accesso diretto al CdA."
+            "spiegazione": "UNIONE BANCARIA — I TRE PILASTRI: (1) SSM (Single Supervisory Mechanism) — OPERATIVO dal 2014: BCE vigila sulle ~120 banche significative (>€30 mld di attivi o >20% PIL nazionale); le banche meno significative sono vigilate dalle autorità nazionali (Banca d'Italia) in coordinamento con BCE. (2) SRM (Single Resolution Mechanism) — OPERATIVO dal 2016: Single Resolution Board (SRB) gestisce le crisi delle banche significant. Fondo di Risoluzione Unico (SRF) con ~€80 mld di target. (3) EDIS — IN STALLO politico: proposto nel 2015, ancora non approvato. Il PROBLEMA: se l'EDIS mutualizza il rischio di default dei depositi, i sistemi bancari solidi (Deutsche banche, ING) potrebbero dover contribuire a salvare depositanti italiani/greci. La precondizione posta da Germania e NL: ridurre prima il rischio (NPL ratio < threshold, limiti alle esposizioni sovrane concentrate) → poi condivisione del rischio EDIS. Progressi: la proposta 2023 della Commissione introduce un approccio ibrido (garanzia liquidity first, poi graduale mutualizzazione). Un EDIS completo sarebbe il completamento dell'architettura finanziaria europea — senza di esso il doom loop bank-sovereign è parzialmente irrisolto."
           },
           {
-            "domanda": "L'ICAAP (Internal Capital Adequacy Assessment Process) che la banca deve condurre annualmente serve a:",
-            "opzioni": ["A) Calcolare automaticamente il CET1 ratio da comunicare alla BCE come requisito minimo", "B) Valutare internamente se il capitale disponibile è adeguato a coprire tutti i rischi materiali della banca, inclusi quelli non coperti dal Pillar 1 (es. rischio di concentrazione, rischio reputazionale), sotto scenario base e scenario stressato", "C) Comunicare agli azionisti il rendimento atteso del capitale nei prossimi 5 anni", "D) Determinare il bonus del management sulla base dei risultati di rischio/rendimento"],
-            "corretta": 1,
-            "spiegazione": "ICAAP (Pillar 2 di Basilea III, CRD IV art. 73): processo auto-valutativo annuale che copre: (1) Identificazione di TUTTI i rischi materiali (inclusi quelli non nel Pillar 1: concentrazione crediti, rischio tasso banking book, rischio di business, rischio reputazionale, rischio ESG). (2) Misurazione del capitale economico necessario (Internal Capital = capitale che la banca stima necessario per coprire le perdite inattese nei vari scenari). (3) Forward-looking: simulazione su 3 anni base + scenario avverso. La BCE/Banca d'Italia usa l'ICAAP per determinare il P2R (Pillar 2 Requirement) aggiuntivo al P1. Se l'ICAAP è inadeguato (processo scadente, modelli deboli), il regolatore impone requisiti di capitale più elevati nel processo SREP (Supervisory Review and Evaluation Process). ILAAP è il parallelo per la liquidità."
+            "testo": "Lo Stress Test EBA biennale valuta la resilienza delle banche europee in uno scenario avverso. L'EBA stress test 2023 ha testato l'impatto di: recessione -6% PIL, tassi +200bps, mercati -55%. Quale variabile impatta di più le banche con portafogli grandi di titoli di Stato classificati FVOCI?",
+            "opzioni": ["A) La variabile tassi (+200bps) — l'aumento dei tassi riduce il valore di mercato dei BTP in FVOCI impattando l'OCI (Other Comprehensive Income) e quindi il CET1 attraverso il filtro prudenziale",
+                        "B) La recessione (-6% PIL) — l'impatto sugli NPL è sempre predominante rispetto al rischio di tasso",
+                        "C) Il crollo dei mercati (-55%) — tutte le banche hanno large equity portfolios",
+                        "D) Lo stress test non considera l'impatto dei tassi sui portafogli FVOCI — usa solo scenari di credito"],
+            "corretta": 0,
+            "spiegazione": "STRESS TEST E PORTAFOGLI SOVRANI FVOCI: La meccanica contabile: i BTP classificati FVOCI sono iscritti al fair value. Le variazioni di fair value vanno in OCI (riserva di patrimonio netto), non a CE. Con rialzo tassi +200bps: duration BTP 10Y ≈ 8 anni → perdita ≈ −8% × 2% = −16% del valore. Se la banca ha €50 mld di BTP FVOCI → OCI negativo di −€8 mld → CET1 si riduce di €8 mld (netto tax). FILTRO PRUDENZIALE: dal 2020 il Regolamento CRR2 ha introdotto un 'Danish Compromise' (filtro prudenziale transitorio): le banche possono escludere parte della perdita su sovrani FVOCI dal CET1 (neutralizzando l'effetto). La scelta è opzionale ma una volta adottata è permanente per quella coorte di titoli. STRESS TEST 2022-2023: il principale impatto sulle banche italiane è stato proprio il portafoglio BTP: €300-400 mld di BTP → anche +100bps di spread/tasso → impatto CET1 di centinaia di pb. Le banche italiane hanno adottato massicciamente il filtro prudenziale per proteggersi. Questo crea una discrepanza tra CET1 'regolamentare' (con filtro) e 'economico' (mark-to-market)."
           },
           {
-            "domanda": "I sistemi di remunerazione dei manager bancari post-2008 devono rispettare la Direttiva CRD IV. Quale regola chiave ha introdotto?",
-            "opzioni": ["A) Abolizione dei bonus variabili per tutti i dipendenti bancari", "B) Il bonus variabile non può superare il 100% della componente fissa (200% con approvazione degli azionisti); la parte variabile deve essere differita nel tempo (fino a 5 anni) e legata a metriche risk-adjusted (es. RAROC, TSR)", "C) I CEO delle banche non possono ricevere più di 10 volte lo stipendio medio dei dipendenti", "D) I bonus devono essere pagati interamente in azioni — nessun pagamento in cash"],
+            "testo": "Il processo SREP BCE per il 2024: una banca riceve un P2R (Pillar 2 Requirement) del 2.5% e un P2G (Pillar 2 Guidance) del 1%. Il CET1 requisito totale è: P1 4.5% + CCB 2.5% + P2R 2.5% + G-SIB buffer 1% + P2G 1% = 11.5%. La banca ha CET1 = 12%. Può pagare dividendi?",
+            "opzioni": ["A) No — il CET1 è sopra il requisito totale, non può distribuire capitale agli azionisti",
+                        "B) Il MDA (Maximum Distributable Amount) si calcola sul buffer sopra P1+CCB+P2R+G-SIB (non incluso il P2G che è solo guidance): CET1 = 12% vs MDA trigger = 4.5+2.5+2.5+1 = 10.5%. Buffer = 1.5pp → può distribuire parte dell'utile; il P2G non è vincolante (non limita i dividendi) ma BCE si aspetta che la banca lavori per rispettarlo",
+                        "C) Può pagare il 100% dei dividendi — il CET1 supera il requisito totale incluso il P2G",
+                        "D) Non può pagare dividendi — il P2G è vincolante e richiede CET1 ≥ 11.5% vs il 12% attuale (buffer troppo sottile)"],
             "corretta": 1,
-            "spiegazione": "CRD IV (Capital Requirements Directive IV, 2013, recepita da Banca d'Italia Circ. 285/2013): Bonus cap: variabile ≤ 100% del fisso (con delibera AGM può arrivare al 200%) per i 'Material Risk Takers' (MRT) — identificati per ruolo o compenso. Deferral: almeno il 40% (60% per CEO) deve essere differito per 3-5 anni. Malus/Clawback: se la banca ottiene risultati negativi nel periodo di maturazione, il bonus può essere ridotto/recuperato. Performance measures: devono includere metriche risk-adjusted (RAROC — Risk-Adjusted Return on Capital) per evitare che i manager assumano rischi eccessivi per il bonus di breve periodo. LOGICA: il 2008 ha mostrato che bonus basati su P&L di breve termine incentivano l'assunzione di rischi con payoff asimmetrico (guadagni immediati, perdite future)."
+            "spiegazione": "MDA (Maximum Distributable Amount) — la meccanica: Il MDA si attiva automaticamente quando il CET1 scende sotto la somma dei REQUISITI VINCOLANTI: P1 (4.5%) + CCB (2.5%) + P2R (2.5%) + G-SIB (1%) = 10.5%. Al di sotto del MDA trigger → limitazioni automatiche: dividendi, buyback e bonus variabili (AT1 coupon continuano). Il P2G (Guidance) NON è vincolante legalmente → non entra nel calcolo MDA trigger. BUFFER DISPONIBILE = 12% − 10.5% = 1.5% (vincolante) → la banca PUÒ pagare dividendi pari a una frazione dell'utile (la tabella MDA BCE determina la % massima distribuibile in base alla distanza dal buffer). COMUNICAZIONE BCE: la BCE si aspetta però che la banca rispetti il P2G (12% > 11.5% ✓ in questo caso), e lo utilizza nelle valutazioni SREP successive. Se la banca scendesse sotto il P2G, la BCE avvierebbe misure supervisory (moral suasion, restrizioni operative) anche se non scattano le limitazioni automatiche del MDA."
           }
         ]
       },
       {
-        "titolo": "M3 — BOSS: Regolamentazione e Vigilanza Europea",
-        "descrizione": "⚔️ BOSS — Basilea III/IV, Banking Union, SSM, SREP, Stress Test EBA",
-        "xp": 180, "boss": True,
+        "id": "R3", "titolo": "◈ BOSS — Crisi, Risoluzione e Basilea IV",
+        "desc": "⚔ BRRD bail-in, resolution tools, TLAC, Basilea IV output floor, SVB case study",
+        "xp": 200, "boss": True,
         "domande": [
           {
-            "domanda": "Il processo SREP (Supervisory Review and Evaluation Process) della BCE valuta 4 elementi per determinare i requisiti di capitale aggiuntivi (P2R). Quale combinazione è corretta?",
-            "opzioni": ["A) Redditività, quota di mercato, numero di dipendenti, anni di attività", "B) Business model viability, governance e risk management, rischi di capitale (credito, mercato, op), rischi di liquidità — ciascuno con score 1-4 che determina il P2R aggiuntivo", "C) CET1 ratio, LCR, NSFR, Leverage ratio — i quattro indicatori quantitativi di Basilea III", "D) Qualità degli attivi, concentrazione geografica, esposizione sovrana, modelli di rating interni"],
+            "testo": "Il caso Silicon Valley Bank (SVB, marzo 2023): la banca aveva $200 miliardi di attivi, quasi tutti in MBS e Treasuries a lunga scadenza (duration ~6 anni), finanziati da depositi non assicurati di startup tech. Quando i tassi salirono al 5%: quale è la sequenza esatta del fallimento?",
+            "opzioni": ["A) SVB è fallita per il rischio di credito — i prestiti alle startup tech sono andati in default massicciamente",
+                        "B) Sequenza: rialzo tassi → svalutazione portafoglio HtM (non rilevata a CE ma nota al mercato) → voci su perdite latenti → bank run digitale (i depositi non assicurati >$250K tech startups si trasferiscono in 48 ore via app) → SVB vende i titoli per far fronte ai rimborsi → le perdite latenti diventano realized → CET1 crolla → fallimento",
+                        "C) SVB è fallita perché la Fed ha revocato la licenza bancaria a causa di violazioni di compliance",
+                        "D) SVB è stata colpita da una cyberattack che ha bloccato il sistema informatico causando la perdita della fiducia"],
             "corretta": 1,
-            "spiegazione": "Lo SREP (EBA GL 2018/03, aggiornate regolarmente): la BCE valuta annualmente ogni banca significativa su 4 pilastri: (1) Business Model Analysis: sostenibilità del modello di business nel breve (1 anno) e medio periodo (3 anni). (2) Internal Governance & Risk Management: qualità del CdA, funzioni di controllo, RAF, ICAAP/ILAAP. (3) Capital Adequacy: adeguatezza del capitale per i rischi del Pillar 1 + Pillar 2 rischi aggiuntivi. (4) Liquidity & Funding: adeguatezza della liquidità e del funding. Ogni pilastro ottiene uno score 1 (migliore) a 4 (worst). Lo score complessivo determina il P2R (requisito aggiuntivo vincolante oltre il P1) e il P2G (guidance non vincolante, buffers raccomandati). Il dialogo SREP è riservato — i risultati sono comunicati privatamente alla banca, ma il CET1 requirement totale è pubblico."
+            "spiegazione": "SVB CASE STUDY — il bank run dell'era digitale: LA VULNERABILITÀ STRUTTURALE: SVB aveva un duration mismatch estremo: Attivi: MBS e Treasuries con duration ~6 anni (classificati HtM — held-to-maturity — le perdite latenti NON impattano il CET1 regolamentare). Passivi: depositi a vista non assicurati di startup tech (~95% sopra $250K, quindi non garantiti FDIC). LA SEQUENZA: Fed alza i tassi da 0% a 5% → portafoglio HtM ha perdite latenti di ~$17 miliardi (non rilevate). Moody's minaccia downgrade → SVB annuncia vendita di titoli a perdita per ricapitalizzarsi → panico. 8-9 marzo 2023: i VC (Sequoia, Founders Fund) consigliano ai portfolio company di ritirare i depositi → $42 miliardi di deflussi IN UN GIORNO via mobile app → impossibile da gestire. FDIC interviene il 10 marzo → FDIC Receivership. LEZIONI: (1) Il 'HtM accounting' nasconde il rischio di tasso reale. (2) I depositi non assicurati sono più volatili di quelli retail. (3) Un bank run digitale è 10× più veloce di uno fisico → la regolamentazione della liquidità (LCR) non aveva previsto questa velocità. (4) La Fed ha garantito tutti i depositi (anche sopra $250K) per evitare contagio sistemico — de facto un bail-out depositi non protetti."
           },
           {
-            "domanda": "Basilea IV (FRTB + SA-Floor) modifica il calcolo degli RWA rispetto a Basilea III. Qual è la modifica principale che impatta le grandi banche con modelli interni?",
-            "opzioni": ["A) Elimina completamente i modelli interni (IRB) obbligando tutte le banche all'approccio standardizzato", "B) Introduce un output floor: gli RWA calcolati con modelli interni non possono scendere sotto il 72.5% degli RWA calcolati con l'approccio standardizzato — riduce il vantaggio competitivo dei modelli interni", "C) Aumenta il CET1 minimum dal 4.5% al 7% per compensare i modelli interni meno conservativi", "D) Vieta l'uso di modelli VaR per il trading book, sostituiti con Expected Shortfall 97.5%"],
+            "testo": "Basilea IV introduce l'Output Floor al 72.5% degli RWA standardizzati. Come cambia la struttura competitiva del mercato bancario europeo tra banche IRB-advanced e banche standardizzate?",
+            "opzioni": ["A) Le banche standardizzate (piccole) sono le più penalizzate — il floor aumenta i loro RWA",
+                        "B) Le grandi banche IRB-advanced (che computavano RWA molto bassi con modelli interni) perdono vantaggio competitivo: il floor limita il risparmio di capitale derivante dall'IRB. Le banche standardizzate (che già calcolano RWA alti) non sono toccate dal floor — il livello playing field si appiattisce",
+                        "C) Il floor impatta egualmente tutte le banche — è una misura di standardizzazione globale",
+                        "D) L'output floor si applica solo alle G-SIB, non alle banche di medie dimensioni"],
             "corretta": 1,
-            "spiegazione": "Basilea IV (implementazione 2025-2028): la riforma finale del framework post-2008. Il core issue: le banche con modelli interni avanzati (IRB per credito, IMA per mercato) calcolavano RWA molto più bassi delle banche con approccio standardizzato → potevano operare con meno capitale. L'output floor al 72.5%: se i RWA da modello interno = €80B, ma gli RWA standardizzati = €120B, il floor impone RWA minimi = 72.5% × 120B = €87B → la banca deve usare i più alti. IMPATTO: le grandi banche europee (Deutsche, BNP, Santander) con modelli interni sofisticati stimano aumenti degli RWA del 15-25% → necessità di rafforzare il capitale. FRTB (Fundamental Review of the Trading Book): nuovi standard per il trading book, sostituisce VaR 99% con ES 97.5% su orizzonti di stress più lunghi."
-          },
-          {
-            "domanda": "La vigilanza bancaria in Italia segue un modello 'misto per soggetti e per finalità'. Come si distribuiscono le competenze tra Banca d'Italia, CONSOB, IVASS e COVIP?",
-            "opzioni": ["A) Banca d'Italia vigila su tutto il sistema finanziario; CONSOB, IVASS e COVIP sono organi consultivi", "B) Banca d'Italia: stabilità prudenziale di banche e intermediari creditizi; CONSOB: trasparenza e correttezza nei mercati mobiliari e nella distribuzione di prodotti finanziari; IVASS: assicurazioni; COVIP: fondi pensione — finalità diverse, soggetti a volte sovrapposti", "C) CONSOB vigila su tutte le istituzioni finanziarie; Banca d'Italia solo sulla moneta e sistema dei pagamenti", "D) La BCE ha assorbito tutte le funzioni degli enti nazionali di vigilanza dopo l'introduzione dell'SSM nel 2014"],
-            "corretta": 1,
-            "spiegazione": "Il modello di vigilanza italiano è 'misto': per soggetti (ente → competenza esclusiva) + per finalità (stesso soggetto → più autorità). Banca d'Italia: stabilità patrimoniale delle banche (SSM per le significant institutions), vigilanza sugli intermediari finanziari ex art. 106 TUB (leasing, factoring companies), sistema dei pagamenti, antiriciclaggio. CONSOB: trasparenza e correttezza del mercato, abusi di mercato, prospetti, distribuzione prodotti finanziari (MiFID II), offerte pubbliche. IVASS (Istituto per la Vigilanza sulle Assicurazioni): stabilità delle imprese assicurative, correttezza distribuzione prodotti assicurativi. COVIP: fondi pensione. Aree di sovrapposizione: le banche distribuiscono prodotti assicurativi (Banca d'Italia + CONSOB + IVASS). Gli intermediari mobiliari bancari (Banca d'Italia per stabilità + CONSOB per MiFID). Il coordinamento avviene tramite il CICR (Comitato Interministeriale per il Credito e il Risparmio) e il CNSF."
+            "spiegazione": "BASILEA IV — OUTPUT FLOOR: il contesto storico: negli anni 2000-2015, le grandi banche europee (Deutsche, BNP, UniCredit) hanno sviluppato modelli IRB avanzati (A-IRB) sempre più sofisticati → RWA del 30-50% inferiori rispetto all'approccio standardizzato → enorme vantaggio competitivo in termini di capitale libero per dividendi, crescita, M&A. Il floor al 72.5%: se RWA_modello = 50, RWA_standardizzato = 100, floor = 72.5 → si usano 72.5 (non 50). Il risparmio IRB scende da 50% a 27.5%. IMPATTO STIMATO (EBA 2021): le banche IRB-advanced europee subiranno un aumento medio degli RWA del 15-25% → richiesta di capitale aggiuntivo di €100-150 miliardi a livello europeo. Le banche più colpite: quelle con modelli interni più 'ottimistici' (banche francesi, tedesche, nordiche con portafogli mutui e corporate a basso PD). EFFETTI COMPETITIVI: (1) Le banche standardizzate (tipicamente medie e piccole) recuperano competitività. (2) Incentivo a cedere portafogli a basso margine (dove il floor è più stringente). (3) Possibile consolidamento bancario europeo per raggiungere la scala necessaria a sopportare il costo del capitale più alto. Timeline: implementazione graduale 2025-2030 in Europa (CRR3)."
           }
         ]
       }
     ]
   },
 
-  # ══════════════════════════════════════════════════════════════
   "macro": {
-    "nome": "🌍 Politica Monetaria & BCE",
-    "badge": "badge-purple", "emoji": "🌍",
-    "xp_totale": 450,
-    "descrizione": "BCE, SEBC, strumenti monetari, inflazione e meccanismi di trasmissione",
-    "accent": "#a78bfa",
+    "nome": "Politica Monetaria BCE", "emoji": "◎",
+    "colore": "purple", "accent": "#5C3D8A",
+    "xp_totale": 600,
+    "desc": "BCE, SEBC, strumenti convenzionali e non, inflazione, meccanismi di trasmissione",
     "livelli": [
       {
-        "titolo": "M1 — Il SEBC e la BCE",
-        "descrizione": "Struttura, mandato, governance, obiettivi e trattato di Maastricht",
-        "xp": 60,
+        "id": "P1", "titolo": "Architettura del SEBC e Mandato BCE",
+        "desc": "Trattati, Maastricht, governance BCE, obiettivi e strumenti",
+        "xp": 80,
         "domande": [
           {
-            "domanda": "I criteri di convergenza di Maastricht (1992) per l'ingresso nell'Eurozona prevedono 4 condizioni. Quale combinazione è corretta?",
-            "opzioni": ["A) PIL pro capite > media UE; disoccupazione < 5%; crescita PIL > 2%; saldo delle partite correnti positivo", "B) Inflazione ≤ 1.5% sopra media dei 3 paesi più virtuosi; deficit/PIL ≤ 3%; debito/PIL ≤ 60% (o in discesa); stabilità del tasso di cambio (ERM II per 2 anni)", "C) Riserve auree > €50 miliardi; sistema bancario privatizzato; zero NPL nel sistema; presenza di una banca centrale indipendente", "D) Rating investment grade del debito sovrano; spread < 200bps vs Germania; bilancio pubblico in pareggio; inflazione < target BCE 2%"],
+            "testo": "Il mandato PRIMARIO della BCE è la stabilità dei prezzi (inflazione ~2%). Il mandato SECONDARIO è supportare le politiche economiche dell'UE (crescita, occupazione). La GERARCHIA è chiara: la stabilità dei prezzi ha priorità. Quando questo trade-off si è manifestato concretamente nel 2022-2023?",
+            "opzioni": ["A) La BCE ha scelto di non alzare i tassi per proteggere la crescita — ha privilegiato il mandato secondario",
+                        "B) La BCE ha alzato i tassi al 4% nonostante la recessione tecnica in Germania e il forte rallentamento dell'economia — il mandato primario di stabilità dei prezzi (inflazione al 10.6% nel picco ottobre 2022) ha prevalso anche a costo di crescita più bassa e maggior sofferenza per debitori a tasso variabile",
+                        "C) La BCE e la Fed hanno coordinato le decisioni di politica monetaria per evitare effetti di spill-over",
+                        "D) Il Trattato di Lisbona ha modificato la gerarchia nel 2009 — ora occupazione e crescita hanno uguale peso rispetto all'inflazione"],
             "corretta": 1,
-            "spiegazione": "I criteri di Maastricht (Trattato 1992, in vigore 1993): (1) Stabilità dei prezzi: inflazione ≤ media dei 3 paesi più virtuosi + 1.5pp. (2) Finanza pubblica: deficit/PIL ≤ 3% e debito/PIL ≤ 60% (o in convincente discesa verso il 60%). (3) Stabilità del tasso di cambio: partecipazione al meccanismo ERM II per ≥2 anni senza svalutazione. (4) Convergenza dei tassi di interesse a lungo termine: entro 2pp dalla media dei 3 paesi più virtuosi. STORIA: l'Italia aveva debito/PIL >100% ma fu ammessa interpretando il criterio 'in convincente diminuzione'. Grecia fu ammessa nel 2001 con dati poi risultati falsificati. Attualmente: 20 paesi nell'Eurozona, 7 fuori (Svezia, Rep. Ceca, Ungheria, Polonia, Bulgaria, Romania, Danimarca). La Svezia viola formalmente i criteri di 'non eccepibilità' ma non vuole entrare (referendum 2003)."
+            "spiegazione": "IL CICLO MONETARIO 2022-2023 — il più aggressivo della storia BCE: CONTESTO: inflazione HICP area euro passa da 2.6% (giugno 2021) a 10.6% (ottobre 2022) — massimo storico. CAUSE: supply-side (energia +41% YoY dopo invasione Russia-Ucraina, agosto 2022) + demand-side (riapertura post-COVID) + seconda rotonda effetti (salari rincorrono i prezzi). RISPOSTA BCE: luglio 2022 — primo rialzo dal 2011, +50bps (inizio del ciclo). 10 rialzi consecutivi fino a settembre 2023 → DFR = 4%. Velocità senza precedenti: da −0.5% a +4% in 14 mesi (+450bps). IMPATTO MANDATO SECONDARIO: crescita dell'area euro quasi piatta nel 2023; Germania in recessione tecnica nel 2022-23. I mutui a tasso variabile (Euribor + spread) sono passati da ~1-2% a ~5-6% → forte aumento degli oneri finanziari delle famiglie italiane. IL DIBATTITO: alcuni membri del Consiglio (Italia, Francia) avrebbero preferito rialzi più graduali. I falchi (Germania, Olanda, Austria) hanno prevalso per via dell'inflazione alta — coerente con la gerarchia del mandato. Prima taglio tassi: giugno 2024 (−25bps) quando l'inflazione era tornata al ~2.6%."
           },
           {
-            "domanda": "La BCE ha il mandato primario di stabilità dei prezzi (inflazione ~2% nel medio termine) e un mandato secondario di supporto alle politiche economiche generali dell'UE. Qual è il principio di indipendenza della BCE?",
-            "opzioni": ["A) La BCE dipende dal Consiglio Europeo che approva le decisioni di tasso prima della pubblicazione", "B) L'indipendenza è sancita dal Trattato TFUE: nessun organo politico (Commissione, Consiglio, governi) può dare istruzioni alla BCE — garantisce credibilità anti-inflazionistica sottraendo le decisioni monetarie alla pressione politica", "C) La BCE è indipendente solo per le decisioni sui tassi; il QE richiede approvazione dei ministri delle finanze dell'Eurozona", "D) L'indipendenza è solo 'de facto' — formalmente la BCE risponde al Parlamento Europeo che può revocare il mandato"],
+            "testo": "Il Trilemma di Mundell-Fleming (Impossibile Trinity) afferma che non si possono avere simultaneamente: libera circolazione dei capitali + tasso di cambio fisso + politica monetaria autonoma. Come si applica all'Eurozona?",
+            "opzioni": ["A) L'Eurozona viola il trilemma — ha tutti e tre contemporaneamente grazie all'unione politica",
+                        "B) I paesi dell'Eurozona hanno rinunciato alla politica monetaria autonoma (è della BCE) per mantenere la libera circolazione dei capitali e il tasso di cambio fisso (l'euro — cambio fisso tra i paesi membri). È la scelta ottimale per mercati integrati, ma priva i governi nazionali dello strumento monetario per rispondere a shock asimmetrici",
+                        "C) L'Eurozona ha rinunciato alla libera circolazione dei capitali — i movimenti di capitale cross-border sono regolamentati dalla BCE",
+                        "D) Il trilemma di Mundell-Fleming si applica solo ai paesi con regime di currency board, non all'Eurozona"],
             "corretta": 1,
-            "spiegazione": "L'indipendenza della BCE è ISTITUZIONALE (sancita dal Trattato, non modificabile senza unanimità degli Stati membri): Art. 130 TFUE: 'Nell'esercizio dei poteri e nell'assolvimento dei compiti e dei doveri loro attribuiti dai Trattati e dallo Statuto del SEBC, la Banca Centrale Europea, le banche centrali nazionali e i componenti dei rispettivi organi decisionali agiscono in modo indipendente.' RAZIONALE: la teoria della credibilità (Kydland & Prescott, Barro & Gordon): una banca centrale dipendente dal governo subisce pressioni a creare inflazione inattesa per stimolare l'output a breve termine → perdita di credibilità → aspettative di inflazione si disancoreranno. L'indipendenza risolve il 'time consistency problem'. Accountability: la BCE risponde al Parlamento Europeo (audizioni) e pubblica verbali, research e comunicati per la trasparenza."
-          },
-          {
-            "domanda": "La struttura del SEBC (Sistema Europeo delle Banche Centrali) prevede una distinzione tra SEBC ed Eurosistema. Qual è?",
-            "opzioni": ["A) Il SEBC è l'organismo di vigilanza, l'Eurosistema è quello monetario — due istituzioni separate", "B) Il SEBC include le banche centrali di TUTTI i 27 paesi UE (inclusi quelli non nell'euro); l'Eurosistema è BCE + banche centrali dei 20 paesi dell'Eurozona — solo l'Eurosistema attua la politica monetaria unica", "C) Il SEBC include solo le grandi banche centrali europee, l'Eurosistema include quelle più piccole", "D) Il SEBC è la struttura storica (pre-euro), l'Eurosistema è la struttura attuale — hanno sostituito il SEBC nel 2002"],
-            "corretta": 1,
-            "spiegazione": "Struttura del sistema europeo: SEBC = BCE + 27 banche centrali nazionali di tutti gli Stati membri UE (inclusi UK fino a Brexit, e ancora oggi Svezia, Polonia, etc. che non hanno l'euro). Il SEBC è il quadro giuridico più ampio. Eurosistema = BCE + 20 banche centrali nazionali dei paesi Eurozona. Solo l'Eurosistema: definisce e attua la politica monetaria unica; gestisce le riserve in valuta estera; promuove il buon funzionamento dei sistemi di pagamento (TARGET2-S). Le BCN dell'area non-euro (es. Banca di Svezia/Riksbank) partecipano al SEBC ma non alle decisioni di politica monetaria dell'Eurosistema. Il Consiglio Direttivo BCE (6 membri Executive Board + 20 governatori BCN Eurozona) prende le decisioni di tasso con sistema di voto a rotazione dal 2015."
+            "spiegazione": "TRILEMMA E AREA EURO: I tre obiettivi incompatibili: Libera circolazione dei capitali — i capitali si muovono liberamente tra Germania e Italia, senza controlli. Tasso di cambio fisso — l'euro elimina il rischio di cambio intra-area. Politica monetaria autonoma — un unico tasso BCE per tutti i 20 paesi. La SCELTA dell'Eurozona: mantenere (1) e (2), rinunciare a (3). PERCHÉ È IMPORTANTE: prima dell'euro, l'Italia usava la lira per aggiustare gli squilibri di competitività → svalutazione → export più competitivi. Con l'euro, la valvola di aggiustamento della svalutazione è scomparsa → l'aggiustamento deve avvenire tramite deflazione dei prezzi/salari (aggiustamento doloroso e lento) o mobilità del lavoro (scarsa in Europa). SHOCK ASIMMETRICO: se la Germania cresce al 3% e l'Italia è in recessione, la politica BCE deve scegliere un tasso che è troppo alto per l'Italia e troppo basso per la Germania → il tasso 'one size fits all' non è ottimale per tutti. L'OCA theory (Optimal Currency Area — Mundell) definisce le condizioni per cui una valuta comune è ottimale: alta mobilità del lavoro, mercati integrati, meccanismi di trasferimento fiscale. L'Eurozona soddisfa solo parzialmente questi criteri."
           }
         ]
       },
       {
-        "titolo": "M2 — Strumenti e Meccanismi di Trasmissione",
-        "descrizione": "MRO, LTRO, TLTRO, QE, tassi negativi, inflazione e trasmissione monetaria",
-        "xp": 100,
+        "id": "P2", "titolo": "Strumenti e Trasmissione Monetaria",
+        "desc": "MRO, LTRO/TLTRO, QE/APP/PEPP, canali di trasmissione, inflazione 2021-23",
+        "xp": 130,
         "domande": [
           {
-            "domanda": "Le Operazioni di Rifinanziamento Principali (MRO) della BCE sono la principale leva di politica monetaria convenzionale. Come funzionano?",
-            "opzioni": ["A) La BCE acquista titoli di Stato direttamente dall'emittente (mercato primario) iniettando liquidità nel bilancio degli Stati", "B) La BCE conduce aste settimanali (durata 1 settimana) in cui le banche richiedono liquidità fornendo collaterale eligibile — il tasso MRO è il tasso guida della BCE che influenza i tassi interbancari e quindi quelli del mercato", "C) La BCE fissa direttamente i tassi sui mutui delle banche commerciali — il tasso MRO è il tasso massimo applicabile ai clienti retail", "D) Le MRO sono accordi di swap con la Federal Reserve per gestire la liquidità in dollari nel sistema europeo"],
+            "testo": "Il QE (Quantitative Easing) della BCE attraverso il programma APP ha acquistato €3.3 trilioni di titoli dal 2015 al 2022. Attraverso quale canale principale ha impattato l'economia reale?",
+            "opzioni": ["A) Canale diretto: la BCE ha trasferito direttamente la moneta creata alle famiglie italiane",
+                        "B) Canale 'portfolio rebalancing': comprando BTP e obbligazioni corporate, la BCE spinge gli investitori verso attività più rischiose (azioni, credito corporate, real estate) riducendo i rendimenti ovunque → condizioni finanziarie più accomodanti → investimenti e consumi aumentano. Anche canale del tasso di cambio (euro più debole → export).",
+                        "C) Canale bancario diretto: i fondi QE vengono girati automaticamente alle banche che li prestano alle imprese",
+                        "D) Il QE non ha canali di trasmissione all'economia reale — è puramente un effetto contabile sulle riserve bancarie"],
             "corretta": 1,
-            "spiegazione": "Le MRO (Main Refinancing Operations): aste settimanali a tasso fisso (da luglio 2022: 4.5% al picco del ciclo) con piena aggiudicazione (tutte le banche ricevono quanto richiesto contro collaterale eligibile). Il tasso MRO (refi rate) è il 'segnale' principale della politica BCE. Insieme al tasso sui depositi (deposit facility rate) e al marginal lending facility rate, forma la 'corridor' dei tassi interbancari. Il tasso di deposito è il floor del mercato interbancario: le banche preferiscono parcheggiare le riserve in eccesso alla BCE (a quel tasso) anziché prestare sotto tale soglia. Le LTRO (Long-Term Refinancing Operations) hanno durata 3 mesi-3 anni. Le TLTRO (Targeted LTRO) hanno introdotto incentivi per il credito all'economia reale: tassi ridotti (anche negativi nel 2020-2021) condizionati alla crescita dei prestiti a famiglie e imprese."
+            "spiegazione": "MECCANISMI DI TRASMISSIONE DEL QE: (1) PORTFOLIO REBALANCING (canale principale): la BCE compra BTP → prezzi BTP salgono, rendimenti scendono → i detentori (banche, fondi) vendono BTP alla BCE e reinvestono in asset più rischiosi (corporate bond, azioni, immobili) → prezzi di tutti gli asset salgono, rendimenti scendono → wealth effect per le famiglie → riduzione del costo del capitale per le imprese. (2) TASSO DI CAMBIO: maggiore offerta di euro sul mercato → euro si svaluta → export più competitivi → crescita. (3) ASPETTATIVE: il commitment al QE segnala che i tassi rimarranno bassi a lungo → le imprese e le famiglie investono e consumano di più ora. (4) CREDIT CHANNEL: minori rendimenti sui govies spingono le banche a fare più credito alle imprese per ottenere rendimenti accettabili. CRITICHE AL QE: (5) Distribuzione dei benefici: chi possiede più asset (i ricchi) beneficia di più dell'aumento dei prezzi → il QE aumenta la disuguaglianza patrimoniale. (6) Bolle degli asset: i prezzi immobiliari e azionari raggiunti livelli record nel periodo 2015-2021. (7) 'Zombification': tassi bassi artificialmente permettono sopravvivenza di aziende non competitive (zombie firms) che usano risorse improduttivamente."
           },
           {
-            "domanda": "Il 'whatever it takes' di Mario Draghi (luglio 2012) è considerato il punto di svolta della crisi dell'Eurozona. Quale strumento annunciò e perché fu efficace?",
-            "opzioni": ["A) Annunciò acquisti illimitati di titoli di Stato sul mercato primario — la BCE avrebbe finanziato direttamente i deficit degli Stati", "B) Annunciò le OMT (Outright Monetary Transactions): acquisti ILLIMITATI sul mercato SECONDARIO di titoli sovrani dei paesi che richiedono assistenza al MES — condizionati a un programma di riforma. Fu efficace perché l'annuncio da solo eliminò il rischio di ridenominazione senza dover comprare quasi nulla", "C) Annunciò la riduzione dei tassi a zero e l'avvio del QE con acquisti di €60 miliardi al mese", "D) Annunciò la creazione del Meccanismo di Stabilità Europeo (MES) con dotazione di €700 miliardi"],
+            "testo": "La 'forward guidance' della BCE è uno strumento di politica monetaria non convenzionale basato sulla comunicazione. Come funziona e quando è più efficace?",
+            "opzioni": ["A) La forward guidance funziona come annuncio legalmente vincolante del tasso BCE futuro — le banche sono obbligate ad adeguarsi",
+                        "B) La forward guidance comunica le intenzioni future di politica monetaria ('i tassi rimarranno bassi per un lungo periodo') influenzando le aspettative di mercato oggi — più credibile è la banca centrale, più i mercati scontano i tassi futuri abbassando i rendimenti a lungo termine già oggi senza che la BCE debba agire ulteriormente",
+                        "C) La forward guidance sostituisce completamente le decisioni di tasso — la BCE non decide più il tasso ma solo comunica la direzione",
+                        "D) La forward guidance è efficace solo nei periodi di alta inflazione quando i mercati non si fidano delle proiezioni BCE"],
             "corretta": 1,
-            "spiegazione": "Il 'whatever it takes' (26 luglio 2012, Londra) è uno dei momenti più significativi della storia finanziaria recente: frase completa: 'Within our mandate, the ECB is ready to do whatever it takes to preserve the euro. And believe me, it will be enough.' Le OMT (annunciate settembre 2012): acquisti ILLIMITATI e sterilizzati di titoli sovrani con scadenza 1-3 anni, condizionati a un programma ESM/MES. Mai utilizzate: il solo annuncio fu sufficiente. Lo spread BTP-Bund da 574bps (novembre 2011) crollò a <150bps entro fine 2012. PERCHÉ FUNZIONÒ: eliminò il 'redenomination risk' (paura di uscita dall'euro → conversione BTP in 'nuove lire' svalutate). È l'esempio più puro di 'commitment device' monetario: la credibilità dell'impegno illimitato spezza il panic equilibrium senza spendere. La Corte di Giustizia UE (2015) confermò la legittimità delle OMT."
+            "spiegazione": "FORWARD GUIDANCE — la comunicazione come strumento di policy: Bernanke (2013): 'Monetary policy is 98% talk and only 2% action.' Perché funziona: se la BCE dice 'i tassi rimarranno bassi almeno fino al 2025', le banche possono fare prestiti a lungo termine oggi a tassi bassi sapendo che il costo del funding rimarrà basso. I mercati scontano i tassi futuri → la yield curve lunga scende → condizioni finanziarie si allentano anche senza toccare il tasso overnight. TIPI DI FORWARD GUIDANCE: Open-ended: 'i tassi rimarranno bassi per un lungo periodo' (vaga, meno credibile). Calendar-based: 'fino a giugno 2024' (più credibile, ma se le condizioni cambiano la BCE è in difficoltà). State-contingent: 'fino a quando l'inflazione non sarà stabilmente al 2%' (più flessibile, BCE post-review 2021 usa questa). CREDIBILITY IS KEY: la forward guidance funziona solo se la banca centrale è credibile. Se i mercati non credono che la BCE manterrà i tassi bassi → scontano già rialzi → la guidance fallisce. Nel 2021, la BCE ha comunicato che l'inflazione era 'transitoria' e i tassi sarebbero rimasti bassi → poi ha dovuto ritrattare bruscamente nel 2022 → danno alla credibilità della guidance futura."
           },
           {
-            "domanda": "Il rialzo BCE dei tassi dal -0.5% al 4% tra luglio 2022 e settembre 2023 è stato il ciclo più rapido della storia BCE. Quale 'canale di trasmissione' ha funzionato più velocemente nel ridurre l'inflazione?",
-            "opzioni": ["A) Il canale del credito bancario — le banche hanno immediatamente smesso di concedere mutui", "B) Il canale del tasso di cambio (euro si apprezza → import più economico → inflazione da import scende) e il canale delle aspettative (segnale forte contro l'inflazione ancorò le aspettative) sono stati i più rapidi; il canale del credito e della domanda aggregata più lenti (lag 12-18 mesi)", "C) Il canale delle riserve bancarie — con tassi alti le banche preferiscono tenere riserve invece di prestare", "D) Il canale fiscale — i tassi più alti aumentano la spesa per interessi degli Stati che tagliano la spesa pubblica per compensare"],
+            "testo": "L'inflazione italiana 2021-2023: l'inflazione HICP è passata da 0.7% (2020) a 8.9% (2022). Quali componenti hanno contribuito e perché l'inflazione dei SERVIZI è stata più persistente dell'inflazione ENERGETICA?",
+            "opzioni": ["A) L'inflazione dei servizi è scesa prima di quella energetica — i servizi hanno catene di fornitura più corte",
+                        "B) L'inflazione energetica (gas, elettricità) è salita e scesa rapidamente (volatile, supply-driven); l'inflazione dei servizi (ristorazione, trasporti, turismo) è più inerziale perché trainata dai salari che si adeguano con ritardo — una volta aumentati i salari, i prezzi dei servizi rimangono alti ('second-round effects')",
+                        "C) Non c'è differenza di persistenza — sia energia che servizi hanno seguito lo stesso pattern temporale",
+                        "D) L'inflazione dei servizi è scesa prima grazie agli effetti delle policy fiscali italiane (bonus vari, calmierazioni)"],
             "corretta": 1,
-            "spiegazione": "I canali di trasmissione della politica monetaria hanno tempistiche diverse: VELOCI (3-6 mesi): Tasso di cambio: i differenziali di tasso attirano capitali → euro si apprezza → prezzi import scendono. Prezzi delle attività: obbligazioni si svalutano, spread creditizi si ampliano. Aspettative: l'annuncio stesso (forward guidance) modifica i comportamenti. MODERATI (6-12 mesi): Tassi sui mutui: i mutui variabili si aggiornano immediatamente, i fissi nelle nuove erogazioni. Costo del credito alle imprese: riduce investimenti. LENTI (12-24 mesi): Domanda aggregata: consumi e investimenti calano gradualmente. Mercato del lavoro: la disoccupazione sale con lag. Salari: le rinegoziazioni contrattuali avvengono con cadenza periodica. Nel ciclo 2022-2023: l'inflazione energetica scese grazie alla normalizzazione del prezzo del gas (offerta) più che per la stretta monetaria; l'inflazione dei servizi (più inerziale, guidata dai salari) resisté a lungo."
+            "spiegazione": "ANATOMY OF EURO AREA INFLATION 2021-2023: FASE 1 (2021-22) — ENERGY-DRIVEN: gas naturale +300% in Europa. Componente energy HICP: +44.3% (ottobre 2022). Causa: invasione Russia-Ucraina (febbraio 2022) + riduzione forniture Gazprom. Questo è inflazione di offerta (supply shock) — la banca centrale non può combattere facilmente la scarsità di gas alzando i tassi. FASE 2 (2022-23) — CORE INFLATION persistente: core HICP (ex energia e food) ha raggiunto il picco di 5.7% nel marzo 2023, scendendo lentamente. SERVIZI: la ristorazione, l'ospitalità, i trasporti hanno alzato i prezzi per recuperare i margini erosi dall'energia. I SALARI hanno iniziato a salire (nel 2022-23) per inseguire l'inflazione → second-round effects. I contratti collettivi italiani (CCNL) vengono rinegoziati con ritardo (ogni 3 anni) → i salari salgono dopo l'inflazione, mantenendola alta più a lungo. IMPLICAZIONE: la BCE ha dovuto mantenere i tassi alti più a lungo del previsto perché l'inflazione core (servizi + alimentari) è rimasta ben sopra il 2% anche quando l'energia era tornata a livelli normali. Dicembre 2023: core inflazione ~3.4%, energy in deflazione — un mix complesso per il Consiglio Direttivo."
           }
         ]
       },
       {
-        "titolo": "M3 — BOSS: Crisi, Politica Non Convenzionale e Futuro",
-        "descrizione": "⚔️ BOSS — QE/PEPP, inflazione 2021-23, tassi negativi, trilemma Mundell-Fleming",
-        "xp": 180, "boss": True,
+        "id": "P3", "titolo": "◈ BOSS — Politica Non Convenzionale e Futuro",
+        "desc": "⚔ PEPP, OMT, TPI, CBDC, tassi negativi, review strategia BCE",
+        "xp": 200, "boss": True,
         "domande": [
           {
-            "domanda": "I tassi negativi della BCE (deposit facility rate -0.5% dal 2019 al 2022) avevano un effetto paradossale sulle banche: quale?",
-            "opzioni": ["A) Le banche guadagnavano tenendo riserve alla BCE grazie al tasso negativo sul deposito", "B) Le banche PAGAVANO la BCE per parcheggiare le riserve in eccesso (-0.5%) ma non potevano trasferire il costo ai depositanti retail (floor a zero per rischio di bank run) → compressione del NIM soprattutto per le banche con raccolta prevalentemente retail", "C) Le banche smettevano di raccogliere depositi per evitare il costo dei tassi negativi → disintermediazione finanziaria", "D) I tassi negativi rendevano i mutui a tasso variabile negativi — le banche dovevano pagare i debitori"],
+            "testo": "Il TPI (Transmission Protection Instrument, luglio 2022) è lo strumento più recente della BCE per combattere la frammentazione dei mercati. Come funziona e in cosa differisce dall'OMT (2012)?",
+            "opzioni": ["A) TPI e OMT sono identici — solo il nome è cambiato",
+                        "B) TPI: acquisti illimitati e non sterilizzati di titoli sovrani di un paese specifico per prevenire la frammentazione 'ingiustificata' — attivabile UNILATERALMENTE dalla BCE (no condizionalità ESM richiesta). OMT: condizionato a un programma ESM/MES. Il TPI rimuove la condizionalità politica e può essere attivato più rapidamente",
+                        "C) Il TPI acquista solo corporate bond, l'OMT solo titoli di Stato",
+                        "D) Il TPI è attivato automaticamente quando lo spread BTP-Bund supera 200bps — è un meccanismo automatico"],
             "corretta": 1,
-            "spiegazione": "Il 'zero lower bound' asimmetrico per le banche: Con deposit facility rate a -0.5%: ogni euro di riserve in eccesso alla BCE costa -0.5% annuo. Le banche applicano tassi negativi ai grandi depositi corporate (>€1M tipicamente), ma NON ai depositi retail: rischio di bank run, rischi reputazionali, vincoli normativi. Risultato: le banche con raccolta prevalentemente retail (casse rurali, banche locali) soffrono di più. Per mitigare, la BCE introdusse il tiering del 2019: le prime 6× le riserve obbligatorie erano esentate dal tasso negativo. CURIOSITÀ: in Danimarca, Jyske Bank applicò tassi negativi anche ai mutui ipotecari retail nel 2019 — caso unico al mondo. La fine dei tassi negativi (luglio 2022) fu il sollievo più atteso dal sistema bancario europeo degli ultimi anni."
+            "spiegazione": "TPI vs OMT — evoluzione degli strumenti anti-frammentazione: OMT (settembre 2012 — Draghi): Acquisti ILLIMITATI ma STERILIZZATI (la liquidità viene ritirata per evitare espansione M3). CONDIZIONATO: il paese deve fare richiesta al MES (ESM) e accettare il programma di aggiustamento. MAI UTILIZZATO: il solo annuncio fu sufficiente. TPI (luglio 2022 — Lagarde): Acquisti ILLIMITATI e NON STERILIZZATI (espansione del bilancio BCE). CONDIZIONALITÀ SEMPLIFICATA: il paese deve rispettare il Patto di Stabilità, non avere 'squilibri macroeconomici gravi', non essere in programma ESM. Attivabile UNILATERALMENTE dalla BCE — nessun paese può bloccare l'attivazione. SCOPE: può comprare titoli sovrani con scadenza 1-10 anni, anche corporate bonds in alcuni casi. RATIO: nato per proteggere la trasmissione del rialzo dei tassi (estate 2022 lo spread BTP era esploso a 250bps) senza che fosse necessaria la condizionalità ESM (politicamente insostenibile per un governo italiano in carica). ANCORA MAI UTILIZZATO: l'annuncio dell'OMT nel 2012 e del TPI nel 2022 sono stati entrambi sufficienti. Il 'Powell Put' europeo — la BCE come backstop dei mercati sovrani."
           },
           {
-            "domanda": "Il PEPP (Pandemic Emergency Purchase Programme, 2020-2022) ha acquistato €1.850 miliardi di titoli, inclusi più BTP italiani per quota rispetto alla capital key BCE. Quale principio ha introdotto?",
-            "opzioni": ["A) La BCE può comprare qualsiasi asset, incluse azioni e immobili, in caso di emergenza", "B) La flessibilità nella distribuzione degli acquisti tra paesi ('pro-rata flexibility'): può deviare dalla capital key per prevenire la frammentazione dei mercati — ha de facto ridotto gli spread dei paesi più vulnerabili come l'Italia in modo più diretto dell'APP", "C) La BCE ha emesso debito comune europeo per finanziare il PEPP — primo eurobond de iure", "D) Il PEPP ha sostituito definitivamente la politica dei tassi come strumento principale della BCE"],
+            "testo": "Le CBDC (Central Bank Digital Currency) — la BCE sta sviluppando l'euro digitale. Quale impatto strutturale potrebbe avere sul sistema bancario europeo?",
+            "opzioni": ["A) Le CBDC non hanno impatto sul sistema bancario — sono solo una versione digitale delle banconote",
+                        "B) Se i cittadini detengono direttamente euro digitali presso la BCE, potrebbero bypassare le banche commerciali per conservare i propri risparmi → disintermediazione bancaria: le banche perderebbero una parte del deposito funding, riducendo la propria capacità di fare credito. La BCE sta considerando limiti massimi di detenzione (€3.000 per individuo) proprio per evitare questo rischio",
+                        "C) Le CBDC rafforzerebbero il sistema bancario perché sarebbero distribuite attraverso le banche commerciali",
+                        "D) Le CBDC sostituirebbero completamente la moneta fisica entro il 2030 secondo il piano BCE"],
             "corretta": 1,
-            "spiegazione": "Il PEPP (18 marzo 2020, annunciato nel mezzo del 'pandemic tantrum'): innovazione chiave → flessibilità rispetto alla capital key BCE (che distribuirebbe gli acquisti in proporzione al PIL di ciascun paese). Con la flessibilità del PEPP, la BCE ha potuto comprare più BTP italiani e Bonos spagnoli nelle fasi di stress, comprimendo gli spread. È stata la risposta alla frammentazione dei mercati causata dalla pandemia. DIFFERENZA dall'APP (Asset Purchase Programme, QE normale): APP rispetta rigidamente la capital key. Il TPI (Transmission Protection Instrument, luglio 2022) ha istituzionalizzato questa flessibilità per contrastare la frammentazione ingiustificata anche dopo la fine del PEPP. CONTROVERSIA: alcuni economisti tedeschi (e la Bundesbank) criticano il PEPP come 'fiscal dominance' — la BCE aiuta indirettamente i governi ad alto debito. La Corte Costituzionale tedesca ha sollevato eccezioni ma non ha bloccato il programma."
-          },
-          {
-            "domanda": "La 'review della strategia' BCE del 2021 ha confermato il target del 2% con simmetria. Perché la simmetria è importante?",
-            "opzioni": ["A) Significa che la BCE reagisce ugualmente sia all'inflazione sia alla deflazione: il 2% è un target puntuale, non un ceiling", "B) Significa solo che la BCE può stare al 2% anche se la media dei paesi core (Germania) è all'1% — non cambia nulla in pratica", "C) Significa che se l'inflazione è alta, la BCE la abbassa; se è bassa, la alza — è la semplice definizione di stabilità dei prezzi", "D) Simmetria si riferisce alla distribuzione dei tassi decisionali del Consiglio Direttivo, non al target di inflazione"],
-            "corretta": 0,
-            "spiegazione": "Pre-2021: il target era 'inferiore ma prossimo al 2%' → asimmetrico (un leggero sforamento al ribasso era accettato, uno al rialzo era il problema). Post-2021: target '2% nel medio termine' con simmetria esplicita: ENTRAMBE le deviazioni (deflazione e inflazione) sono ugualmente indesiderate e richiedono risposta. Implicazioni: Con simmetria, la BCE non può permettersi anni di inflazione all'1% senza reagire (come era accaduto nel 2015-2019). Giustifica il QE e i tassi negativi come risposta all'inflazione troppo bassa — non solo all'inflazione troppo alta. Legittima la strategia 'make-up': la BCE può tollerare un breve periodo di inflazione sopra il 2% per recuperare i periodi sotto il 2%. La 'clausola di tolleranza': in fasi di transizione con impatto marcato dell'inflazione sul PIL reale, la BCE può agire più gradualmente considerando le implicazioni per l'occupazione."
+            "spiegazione": "EURO DIGITALE (e-euro) — BCE project lancio: da ottobre 2023 in fase preparatoria, emissione stimata non prima del 2026-2028. COSA È: passività diretta della BCE (come le banconote) in forma digitale, detenibile da individui e imprese. COSA NON È: non è una criptovaluta (è centralizzata), non è anonima (traceabile per antiriciclaggio), non è un investimento (nessun interesse). RISCHIO DISINTERMEDIAZIONE: se tutti convertissero i propri depositi bancari in e-euro → le banche perderebbero il funding → dovrebbero raccogliere più fondi sul mercato wholesale a costi più alti → meno credito o credito più costoso → credit crunch. MITIGAZIONE BCE: limite di detenzione individuale proposto: €3.000 (come per il portafoglio fisico) — abbastanza per i pagamenti quotidiani, troppo poco per i risparmi → minimizza la concorrenza con i depositi bancari. SCENARIO DI BANK RUN DIGITALE: in una crisi, i cittadini potrebbero trasferire in secondi i propri depositi in e-euro (safe asset garantito dallo Stato) → amplificatore delle crisi bancarie → serve una 'circuit breaker'. Il design dell'euro digitale è la questione architetturale più rilevante dell'industria finanziaria europea per il prossimo decennio."
           }
         ]
       }
@@ -654,343 +920,383 @@ MISSIONS = {
   }
 }
 
-# ─── HELPERS ───────────────────────────────────────────────────────────────────
-AREA_ACCENTS = {k: v["accent"] for k, v in MISSIONS.items()}
-
+# ─── HELPERS ─────────────────────────────────────────────────────────────────
 def get_livello(xp):
-    if xp < 100:   return 1, "Studente Curioso 📚"
-    elif xp < 300: return 2, "Analista Junior 📊"
-    elif xp < 600: return 3, "Portfolio Manager 💼"
-    elif xp < 1000:return 4, "Senior Banker 🏦"
-    elif xp < 1500:return 5, "CFO / CRO 🎩"
-    elif xp < 2000:return 6, "MD Finance ⭐"
-    else:          return 7, "Guru della Finanza 🏆"
+    thresholds = [(0,"Matricola 📖"),(150,"Analista Trainee 📊"),(400,"Junior Analyst 📈"),
+                  (800,"Associate 💼"),(1400,"Vice President 🏛"),(2200,"Director ◈"),(3200,"Managing Director 🎩"),(4500,"Partner & Legend 🏆")]
+    for thresh, title in reversed(thresholds):
+        if xp >= thresh: return thresholds.index((thresh,title))+1, title
+    return 1, "Matricola 📖"
 
-def xp_threshold(lv): return [0,100,300,600,1000,1500,2000,9999][lv-1]
-def xp_to_next(xp): return xp_threshold(get_livello(xp)[0])
-def missione_id(area, idx): return f"{area}_{idx}"
-def is_completata(area, idx): return missione_id(area, idx) in st.session_state.missioni_completate
+def xp_next_thresh(xp):
+    thresholds = [0,150,400,800,1400,2200,3200,4500,99999]
+    for t in thresholds:
+        if xp < t: return t
+    return 99999
 
-def check_badge():
-    xp = st.session_state.xp; mc = st.session_state.missioni_completate; b = st.session_state.badge_guadagnati; new = []
-    def add(bid, emoji, nome, desc):
-        if bid not in b: new.append((emoji, nome, desc)); b.append(bid)
-    if xp >= 100:  add("xp100",  "🌟", "Prima Stella",    "100 XP!")
-    if xp >= 500:  add("xp500",  "⚡", "Mezz'Opera",       "500 XP!")
-    if xp >= 1000: add("xp1000", "💎", "Mille XP",         "1000 XP!")
-    if xp >= 2000: add("xp2000", "👑", "Duemila XP",       "Leggendario!")
-    for area in MISSIONS:
-        n = len(MISSIONS[area]["livelli"])
-        if sum(1 for m in mc if area in m) >= n:
-            e = MISSIONS[area]["emoji"]
-            add(f"{area}_master", e, f"Master {area.title()}", f"Tutte le missioni {area}!")
+def mid(area, idx): return f"{area}_{idx}"
+def is_done(area, idx): return mid(area, idx) in st.session_state.completate
+
+def check_badges():
+    xp = st.session_state.xp; mc = st.session_state.completate; b = st.session_state.badge; new = []
+    def add(bid, em, nm, ds):
+        if bid not in b: new.append((em, nm, ds)); b.append(bid)
+    if xp >= 150: add("lv2","📊","Analista Trainee","150 XP raggiunta!")
+    if xp >= 400: add("lv3","📈","Junior Analyst","400 XP raggiunta!")
+    if xp >= 800: add("lv4","💼","Associate","800 XP raggiunta!")
+    if xp >= 1400:add("lv5","🏛","Vice President","1400 XP!")
+    if xp >= 2200:add("lv6","◈","Director","2200 XP — Élite!")
+    if xp >= 3200:add("lv7","🎩","Managing Director","3200 XP — Leggendario!")
+    for ak, av in MISSIONS.items():
+        n = len(av["livelli"])
+        if sum(1 for m in mc if ak in m) >= n:
+            add(f"{ak}_m", av["emoji"], f"Master: {av['nome']}", "Area completata!")
     if len(mc) >= sum(len(v["livelli"]) for v in MISSIONS.values()):
-        add("champion", "🏆", "FinQuest Champion", "Tutte le missioni completate!")
-    if st.session_state.streak >= 5: add("streak5","🔥","On Fire!","5 missioni di fila!")
+        add("champ","🏆","Grand Champion","Tutto il corso completato!")
+    if st.session_state.streak >= 5: add("fire","🔥","On Fire","5 consecutive!")
+    if st.session_state.streak >= 10: add("inferno","⚡","Inferno","10 consecutive!")
     return new
 
-# ─── SESSION STATE ─────────────────────────────────────────────────────────────
+# ─── SESSION ──────────────────────────────────────────────────────────────────
 def init():
-    d = dict(nome_studente="", registrato=False, xp=0, missioni_completate=[], livello_corrente=None,
-             area_corrente=None, domanda_idx=0, risposta_data=None, punteggio_quiz=0, fase="home",
-             streak=0, badge_guadagnati=[])
-    for k, v in d.items():
+    d = dict(nome="", registrato=False, xp=0, completate=[], area=None, liv=None,
+             qidx=0, risposta=None, score=0, fase="home", streak=0, badge=[])
+    for k,v in d.items():
         if k not in st.session_state: st.session_state[k] = v
 init()
 
-# ─── SIDEBAR ───────────────────────────────────────────────────────────────────
+# ─── SIDEBAR ──────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("""
-    <div style="text-align:center;padding:20px 0 10px;">
-        <div style="font-family:'Syne',sans-serif;font-size:1.75rem;font-weight:800;
-             background:linear-gradient(135deg,#63b3ed,#a78bfa,#f6ad55);
-             -webkit-background-clip:text;-webkit-text-fill-color:transparent;">FinQuest</div>
-        <div style="color:#1e293b;font-size:0.62rem;letter-spacing:3px;text-transform:uppercase;margin-top:2px;">
-            Economia degli Intermediari
-        </div>
+    <div style="padding:24px 16px 16px;">
+      <div style="font-family:'DM Serif Display',serif;font-size:2rem;color:#F5F0E8;line-height:1;margin-bottom:2px;">FinQuest</div>
+      <div style="font-family:'DM Mono',monospace;font-size:0.58rem;color:#5C3D8A;letter-spacing:3px;text-transform:uppercase;">EIF 2026 — Accademia</div>
+      <div style="margin-top:12px;height:1px;background:linear-gradient(90deg,rgba(201,168,76,0.4),transparent);"></div>
     </div>""", unsafe_allow_html=True)
-    st.divider()
 
     if st.session_state.registrato:
         lv, titolo = get_livello(st.session_state.xp)
-        xp_next = xp_to_next(st.session_state.xp)
-        xp_prev = xp_threshold(lv)
-        prog = min((st.session_state.xp - xp_prev) / max(xp_next - xp_prev, 1), 1.0)
-        st.markdown(f"""
-        <div style="padding:10px 12px;">
-            <div style="color:#1e293b;font-size:0.65rem;text-transform:uppercase;letter-spacing:1.5px;">Studente</div>
-            <div style="color:#e2e8f0;font-weight:600;font-size:1rem;margin:2px 0;">{st.session_state.nome_studente}</div>
-            <div style="color:#a78bfa;font-size:0.78rem;margin-bottom:12px;">{titolo}</div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-                <span style="color:#1e293b;font-size:0.65rem;text-transform:uppercase;">XP</span>
-                <span style="color:#63b3ed;font-size:0.72rem;font-weight:600;">{st.session_state.xp}/{xp_next}</span>
-            </div>
-            <div class="xp-bar-container"><div class="xp-bar-fill" style="width:{prog*100:.0f}%;"></div></div>
-            <div style="display:flex;gap:5px;margin-top:12px;">
-                {"".join([f'<div style="flex:1;background:rgba(10,14,26,0.8);border:1px solid rgba(99,179,237,0.1);border-radius:9px;padding:8px 4px;text-align:center;"><div style="color:{c};font-family:Syne,sans-serif;font-size:0.95rem;font-weight:800;">{v}</div><div style="color:#1e293b;font-size:0.58rem;margin-top:1px;">{l}</div></div>'
-                          for v,l,c in [(f"Lv.{lv}","Livello","#63b3ed"),(len(st.session_state.missioni_completate),"Missioni","#68d391"),(f"{st.session_state.streak}🔥","Streak","#f6ad55")]])}
-            </div>
-        </div>""", unsafe_allow_html=True)
-        st.divider()
-        for icon, label, fase in [("🗺️","Mappa Missioni","home"),("🏆","Leaderboard","leaderboard"),("👤","Profilo","profilo")]:
-            if st.button(f"{icon}  {label}", key=f"nav_{fase}", use_container_width=True):
-                st.session_state.fase = fase; st.rerun()
-        if st.session_state.badge_guadagnati:
-            bmap={"xp100":"🌟","xp500":"⚡","xp1000":"💎","xp2000":"👑","champion":"🏆","streak5":"🔥",
-                  **{f"{a}_master":MISSIONS[a]["emoji"] for a in MISSIONS}}
-            html=" ".join([f'<span title="{b}" style="font-size:1.2rem;">{bmap.get(b,"🎖️")}</span>' for b in st.session_state.badge_guadagnati])
-            st.markdown(f'<div style="padding:8px 12px;"><div style="color:#1e293b;font-size:0.62rem;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;">Badge</div><div style="display:flex;flex-wrap:wrap;gap:3px;">{html}</div></div>', unsafe_allow_html=True)
-
-# ─── REGISTRAZIONE ─────────────────────────────────────────────────────────────
-if not st.session_state.registrato:
-    st.markdown('<div class="hero-title">FinQuest 🏦</div>', unsafe_allow_html=True)
-    st.markdown('<div class="hero-sub">Economia degli Intermediari Finanziari — EIF 2026</div>', unsafe_allow_html=True)
-    st.markdown("<br>", unsafe_allow_html=True)
-    c1,c2,c3 = st.columns([1,2,1])
-    with c2:
+        xn = xp_next_thresh(st.session_state.xp)
+        xp2 = [0,150,400,800,1400,2200,3200,4500][min(lv-1,7)]
+        prog = min((st.session_state.xp - xp2) / max(xn - xp2, 1), 1.0)
         tm = sum(len(v["livelli"]) for v in MISSIONS.values())
-        tx = sum(v["xp_totale"] for v in MISSIONS.values())
-        tq = sum(len(q["domande"]) for v in MISSIONS.values() for q in v["livelli"])
-        st.markdown(f"""
-        <div style="background:rgba(10,14,26,0.95);border:1px solid rgba(99,179,237,0.15);border-radius:24px;padding:36px;text-align:center;box-shadow:0 0 40px rgba(99,179,237,0.06);">
-            <div style="font-size:3rem;margin-bottom:14px;">🎓</div>
-            <div style="color:#e2e8f0;font-size:1.2rem;font-weight:600;margin-bottom:6px;">Benvenuto nell'Accademia</div>
-            <div style="color:#334155;font-size:0.85rem;line-height:1.7;margin-bottom:24px;">
-                Completa missioni su tutto il programma EIF:<br>
-                sistema finanziario, banche, mercati, intermediari non bancari,<br>
-                rischio e politica monetaria.
-            </div>
-            <div style="display:flex;justify-content:center;gap:28px;">
-                {"".join([f'<div><div style="color:{c};font-family:Syne,sans-serif;font-size:1.7rem;font-weight:800;">{v}</div><div style="color:#1e293b;font-size:0.68rem;text-transform:uppercase;letter-spacing:1px;margin-top:2px;">{l}</div></div>' for v,l,c in [(len(MISSIONS),"Aree","#63b3ed"),(tm,"Missioni","#a78bfa"),(tq,"Domande","#f6ad55"),(tx,"XP Tot.","#68d391")]])}
-            </div>
-        </div>""", unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
-        nome = st.text_input("✏️ Come ti chiami?", placeholder="Nome e cognome...")
-        if st.button("🚀 Inizia l'Avventura!", use_container_width=True):
-            if nome.strip():
-                st.session_state.nome_studente = nome.strip()
-                st.session_state.registrato = True
-                save_progress(); st.rerun()
-            else: st.warning("Inserisci il tuo nome per continuare!")
+        tc = len(st.session_state.completate)
 
-# ─── HOME ───────────────────────────────────────────────────────────────────────
+        st.markdown(f"""
+        <div style="padding:4px 16px 16px;">
+          <div style="color:#8A94A6;font-family:'DM Mono',monospace;font-size:0.6rem;letter-spacing:2px;text-transform:uppercase;margin-bottom:2px;">Studente</div>
+          <div style="color:#F5F0E8;font-weight:700;font-size:1rem;margin-bottom:1px;">{st.session_state.nome}</div>
+          <div style="color:#C9A84C;font-family:'DM Mono',monospace;font-size:0.68rem;margin-bottom:14px;">{titolo}</div>
+
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+            <span style="color:#5C6878;font-family:'DM Mono',monospace;font-size:0.58rem;letter-spacing:1.5px;text-transform:uppercase;">Progressione</span>
+            <span style="color:#C9A84C;font-family:'DM Mono',monospace;font-size:0.68rem;">{st.session_state.xp} xp</span>
+          </div>
+          <div class="xp-track"><div class="xp-fill" style="width:{prog*100:.0f}%;"></div></div>
+          <div style="color:#3D4A5C;font-family:'DM Mono',monospace;font-size:0.58rem;margin-top:4px;">{xn - st.session_state.xp} xp al prossimo livello</div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:14px;">
+            {''.join([f'<div style="background:#0D101A;border:1px solid rgba(201,168,76,0.1);border-radius:3px;padding:8px 4px;text-align:center;"><div style="font-family:DM Serif Display,serif;font-size:1.2rem;color:{c};">{v}</div><div style="font-family:DM Mono,monospace;font-size:0.55rem;color:#3D4A5C;text-transform:uppercase;letter-spacing:1px;margin-top:1px;">{l}</div></div>' for v,l,c in [(f"Lv.{lv}","Livello","#C9A84C"),(f"{tc}/{tm}","Quest","#2A7B7C"),(f"{st.session_state.streak}🔥","Streak","#C4522A")]])}
+          </div>
+        </div>
+        <div style="margin:4px 16px;height:1px;background:rgba(201,168,76,0.08);"></div>""", unsafe_allow_html=True)
+
+        for ico, lbl, fase in [("◈","Mappa Missioni","home"),("▲","Classifica","leaderboard"),("◉","Profilo","profilo")]:
+            if st.button(f"{ico}  {lbl}", key=f"nav_{fase}", use_container_width=True):
+                st.session_state.fase = fase; st.rerun()
+
+        if st.session_state.badge:
+            bmap = {"lv2":"📊","lv3":"📈","lv4":"💼","lv5":"🏛","lv6":"◈","lv7":"🎩","champ":"🏆","fire":"🔥","inferno":"⚡",
+                    **{f"{ak}_m":av["emoji"] for ak,av in MISSIONS.items()}}
+            icons = " ".join([f'<span style="font-size:1rem;">{bmap.get(b,"🎖")}</span>' for b in st.session_state.badge])
+            st.markdown(f'<div style="padding:8px 16px;"><div style="font-family:DM Mono,monospace;font-size:0.55rem;color:#3D4A5C;text-transform:uppercase;letter-spacing:2px;margin-bottom:5px;">Badge</div><div style="display:flex;flex-wrap:wrap;gap:3px;">{icons}</div></div>', unsafe_allow_html=True)
+
+# ─── REGISTRAZIONE ────────────────────────────────────────────────────────────
+if not st.session_state.registrato:
+    now = datetime.now()
+    tm = sum(len(v["livelli"]) for v in MISSIONS.values())
+    tq = sum(len(q["domande"]) for v in MISSIONS.values() for q in v["livelli"])
+    tx = sum(v["xp_totale"] for v in MISSIONS.values())
+
+    st.markdown(f"""
+    <div class="masthead">
+      <div class="masthead-date">{now.strftime("%A, %d %B %Y")} — Anno Accademico 2025/2026</div>
+      <div class="masthead-title">FinQuest</div>
+      <div class="masthead-rule"><span style="font-family:'DM Mono',monospace;font-size:0.6rem;color:#C9A84C;letter-spacing:4px;">ECONOMIA DEGLI INTERMEDIARI FINANZIARI</span></div>
+      <div class="masthead-subtitle">Il gioco di apprendimento del corso EIF — Università La Sapienza</div>
+    </div>""", unsafe_allow_html=True)
+
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        st.markdown(f"""
+        <div style="background:#0D101A;border:1px solid rgba(201,168,76,0.15);border-radius:4px;padding:40px 36px;margin-bottom:20px;">
+          <div style="font-family:'DM Serif Display',serif;font-size:1.6rem;color:#F5F0E8;margin-bottom:8px;line-height:1.2;">
+            L'Accademia della Finanza
+          </div>
+          <div style="font-family:'DM Mono',monospace;font-size:0.72rem;color:#8A94A6;line-height:1.9;margin-bottom:28px;">
+            Affronta missioni su tutto il programma EIF: dal sistema finanziario<br>
+            alla politica monetaria, dal bilancio bancario ai mercati mobiliari.<br>
+            Scala i livelli, conquista badge, scala la classifica.
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px;">
+            {''.join([f'<div style="border:1px solid rgba(201,168,76,0.12);border-top:2px solid {c};border-radius:3px;padding:14px 10px;text-align:center;"><div style="font-family:DM Serif Display,serif;font-size:1.8rem;color:{c};">{v}</div><div style="font-family:DM Mono,monospace;font-size:0.58rem;color:#3D4A5C;text-transform:uppercase;letter-spacing:1.5px;margin-top:3px;">{l}</div></div>' for v,l,c in [(len(MISSIONS),"Aree","#C9A84C"),(tm,"Missioni","#2A7B7C"),(tq,"Domande","#C4522A"),(tx,"XP Max","#5C3D8A")]])}
+          </div>
+          <div style="height:1px;background:rgba(201,168,76,0.08);margin-bottom:20px;"></div>
+        </div>""", unsafe_allow_html=True)
+
+        nome = st.text_input("", placeholder="Il tuo nome e cognome...", label_visibility="collapsed")
+        if st.button("◈  Accedi all'Accademia", use_container_width=True):
+            if nome.strip():
+                st.session_state.nome = nome.strip(); st.session_state.registrato = True
+                save_progress(); st.rerun()
+            else: st.warning("Inserisci il tuo nome per continuare.")
+
+# ─── HOME ─────────────────────────────────────────────────────────────────────
 elif st.session_state.fase == "home":
     lv, titolo = get_livello(st.session_state.xp)
     tm = sum(len(v["livelli"]) for v in MISSIONS.values())
-    tc = len(st.session_state.missioni_completate)
+    tc = len(st.session_state.completate)
+
     st.markdown(f"""
-    <div style="margin-bottom:28px;">
-        <div style="font-family:'Syne',sans-serif;font-size:1.9rem;font-weight:800;color:#e2e8f0;margin-bottom:3px;">
-            Ciao, {st.session_state.nome_studente} 👋
+    <div class="masthead" style="margin-bottom:28px;">
+      <div class="masthead-date">Mappa delle Missioni — {datetime.now().strftime("%d %B %Y")}</div>
+      <div style="display:flex;align-items:baseline;gap:20px;flex-wrap:wrap;">
+        <div class="masthead-title" style="font-size:3rem;">{st.session_state.nome}</div>
+        <div>
+          <div style="font-family:'DM Mono',monospace;font-size:0.65rem;color:#C9A84C;letter-spacing:2px;">{titolo}</div>
+          <div style="font-family:'DM Mono',monospace;font-size:0.6rem;color:#3D4A5C;">{tc}/{tm} missioni · {st.session_state.xp} XP</div>
         </div>
-        <div style="color:#334155;font-size:0.85rem;">{tc}/{tm} missioni completate · {st.session_state.xp} XP · {titolo}</div>
+      </div>
     </div>""", unsafe_allow_html=True)
 
-    for area_key, area_data in MISSIONS.items():
-        done = sum(1 for m in st.session_state.missioni_completate if area_key in m)
-        tot = len(area_data["livelli"])
-        acc = area_data["accent"]
+    COLORS = {"gold":"#C9A84C","blue":"#2C5F8A","teal":"#2A7B7C","rust":"#C4522A","purple":"#5C3D8A"}
+
+    for ak, av in MISSIONS.items():
+        done_c = sum(1 for m in st.session_state.completate if ak in m)
+        tot_c = len(av["livelli"])
+        acc = COLORS.get(av["colore"], "#C9A84C")
+        pct = done_c / tot_c
+
         st.markdown(f"""
-        <div style="display:flex;align-items:center;gap:12px;margin:28px 0 12px;">
-            <div style="width:38px;height:38px;background:rgba(10,14,26,0.9);border:1px solid {acc}25;
-                 border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;">
-                {area_data['emoji']}
-            </div>
+        <div style="margin:32px 0 14px;">
+          <div style="display:flex;align-items:center;gap:14px;">
+            <div style="font-family:'DM Serif Display',serif;font-size:1.6rem;color:{acc};">{av['emoji']}</div>
             <div style="flex:1;">
-                <div style="color:#e2e8f0;font-weight:600;font-size:1rem;">{area_data['nome']}</div>
-                <div style="color:#1e293b;font-size:0.75rem;margin-top:1px;">{area_data['descrizione']}</div>
+              <div style="font-family:'DM Serif Display',serif;font-size:1.2rem;color:#F5F0E8;">{av['nome']}</div>
+              <div style="font-family:'DM Mono',monospace;font-size:0.65rem;color:#5C6878;margin-top:1px;">{av['desc']}</div>
             </div>
-            <span class="badge {area_data['badge']}">{done}/{tot}</span>
+            <div style="text-align:right;">
+              <div style="font-family:'DM Mono',monospace;font-size:0.75rem;color:{acc};">{done_c}/{tot_c}</div>
+              <div style="width:80px;margin-top:4px;"><div class="xp-track" style="height:2px;"><div style="height:100%;width:{pct*100:.0f}%;background:{acc};border-radius:1px;"></div></div></div>
+            </div>
+          </div>
+          <div style="height:1px;background:linear-gradient(90deg,{acc}30,transparent);margin-top:10px;"></div>
         </div>""", unsafe_allow_html=True)
 
-        cols = st.columns(tot)
-        for i, lv_data in enumerate(area_data["livelli"]):
+        cols = st.columns(len(av["livelli"]))
+        for i, ld in enumerate(av["livelli"]):
             with cols[i]:
-                comp = is_completata(area_key, i)
-                boss = lv_data.get("boss", False)
-                lock = i > 0 and not is_completata(area_key, i-1)
-                op   = "0.3" if lock else "1"
-                bg   = "rgba(104,211,145,0.06)" if comp else ("rgba(30,10,10,0.9)" if boss else "rgba(10,14,26,0.9)")
-                bc   = "rgba(104,211,145,0.3)" if comp else ("rgba(252,129,129,0.28)" if boss else f"rgba(99,179,237,0.18)")
-                ico  = "✅" if comp else ("⚔️" if boss else ("🔒" if lock else "▶️"))
+                comp = is_done(ak, i)
+                boss = ld.get("boss", False)
+                lock = i > 0 and not is_done(ak, i-1)
+                border_c = "#2E7D52" if comp else ("#C4522A55" if boss else f"{acc}25")
+                bg_c = "#060E09" if comp else ("#130A06" if boss else "#0D101A")
+                ico = "✓" if comp else ("⚔" if boss else ("◌" if lock else "▶"))
+                ico_c = "#2E7D52" if comp else ("#C4522A" if boss else ("#3D4A5C" if lock else acc))
+                num = ld.get("id","?")
+                boss_anim = "boss-flicker" if boss and not lock and not comp else ""
+
                 st.markdown(f"""
-                <div style="background:{bg};border:1px solid {bc};border-radius:15px;padding:16px 14px;
-                     opacity:{op};min-height:150px;{'animation:boss-pulse 2s infinite;' if boss and not lock and not comp else ''}">
-                    <div style="font-size:1.4rem;margin-bottom:7px;">{ico}</div>
-                    <div style="color:#e2e8f0;font-weight:600;font-size:0.79rem;line-height:1.4;margin-bottom:5px;">
-                        {lv_data['titolo'][:40]}{'...' if len(lv_data['titolo'])>40 else ''}
-                    </div>
-                    <div style="color:#1e293b;font-size:0.7rem;line-height:1.4;margin-bottom:8px;">
-                        {lv_data['descrizione'][:50]}...
-                    </div>
-                    <div style="color:#f6ad55;font-size:0.75rem;font-weight:600;">+{lv_data['xp']} XP</div>
+                <div class="mission-tile {boss_anim}" style="background:{bg_c};border:1px solid {border_c};opacity:{'0.32' if lock else '1'};">
+                  <div class="deco-num">{num}</div>
+                  <div style="font-family:'DM Mono',monospace;font-size:1rem;color:{ico_c};margin-bottom:8px;">{ico}</div>
+                  <div style="font-family:'DM Serif Display',serif;font-size:0.85rem;color:#C8C0B0;line-height:1.4;margin-bottom:6px;">{ld['titolo']}</div>
+                  <div style="font-family:'DM Mono',monospace;font-size:0.62rem;color:#3D4A5C;line-height:1.5;margin-bottom:10px;">{ld['desc'][:55]}{'…' if len(ld['desc'])>55 else ''}</div>
+                  <div style="font-family:'DM Mono',monospace;font-size:0.68rem;color:{acc};">+{ld['xp']} xp</div>
                 </div>""", unsafe_allow_html=True)
+
                 if not lock and not comp:
-                    lbl = "⚔️ Boss!" if boss else "▶️ Gioca"
-                    if st.button(lbl, key=f"p_{area_key}_{i}", use_container_width=True):
-                        st.session_state.area_corrente=area_key; st.session_state.livello_corrente=i
-                        st.session_state.domanda_idx=0; st.session_state.risposta_data=None
-                        st.session_state.punteggio_quiz=0; st.session_state.fase="quiz"; st.rerun()
+                    lbl = "⚔  Boss Fight" if boss else "▶  Inizia"
+                    if st.button(lbl, key=f"p_{ak}_{i}", use_container_width=True):
+                        st.session_state.area=ak; st.session_state.liv=i
+                        st.session_state.qidx=0; st.session_state.risposta=None
+                        st.session_state.score=0; st.session_state.fase="quiz"; st.rerun()
                 elif comp:
-                    if st.button("🔄", key=f"r_{area_key}_{i}", use_container_width=True):
-                        st.session_state.area_corrente=area_key; st.session_state.livello_corrente=i
-                        st.session_state.domanda_idx=0; st.session_state.risposta_data=None
-                        st.session_state.punteggio_quiz=0; st.session_state.fase="quiz"; st.rerun()
+                    if st.button("◌  Rigioca", key=f"r_{ak}_{i}", use_container_width=True):
+                        st.session_state.area=ak; st.session_state.liv=i
+                        st.session_state.qidx=0; st.session_state.risposta=None
+                        st.session_state.score=0; st.session_state.fase="quiz"; st.rerun()
                 else:
-                    st.button("🔒", key=f"l_{area_key}_{i}", use_container_width=True, disabled=True)
+                    st.button("◌  Bloccato", key=f"l_{ak}_{i}", use_container_width=True, disabled=True)
 
-# ─── QUIZ ──────────────────────────────────────────────────────────────────────
+# ─── QUIZ ────────────────────────────────────────────────────────────────────
 elif st.session_state.fase == "quiz":
-    area = st.session_state.area_corrente
-    li   = st.session_state.livello_corrente
-    ad   = MISSIONS[area]; ld = ad["livelli"][li]
-    qs   = ld["domande"]; qi = st.session_state.domanda_idx
-    boss = ld.get("boss", False)
-    acc  = ad["accent"]
+    ak=st.session_state.area; li=st.session_state.liv
+    av=MISSIONS[ak]; ld=av["livelli"][li]
+    qs=ld["domande"]; qi=st.session_state.qidx
+    boss=ld.get("boss",False); acc=COLORS.get(av["colore"],"#C9A84C") if "COLORS" in dir() else "#C9A84C"
+    COLORS2 = {"gold":"#C9A84C","blue":"#2C5F8A","teal":"#2A7B7C","rust":"#C4522A","purple":"#5C3D8A"}
+    acc = COLORS2.get(av["colore"],"#C9A84C")
 
-    if st.button("← Mappa", key="back"):
-        st.session_state.fase = "home"; st.rerun()
+    c_back, _ = st.columns([1,5])
+    with c_back:
+        if st.button("← Mappa", key="bk"):
+            st.session_state.fase = "home"; st.rerun()
 
     st.markdown(f"""
-    <div style="margin:14px 0 22px;">
-        <div style="color:#1e293b;font-size:0.72rem;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:3px;">
-            {ad['nome']} › {ld['titolo']}
-        </div>
-        <div style="font-family:'Syne',sans-serif;font-size:1.6rem;font-weight:800;color:#e2e8f0;">
-            {'⚔️ BOSS FIGHT' if boss else f'Domanda {qi+1} / {len(qs)}'}
-        </div>
+    <div style="margin:12px 0 20px;">
+      <div style="font-family:'DM Mono',monospace;font-size:0.6rem;color:{acc};letter-spacing:2px;text-transform:uppercase;margin-bottom:3px;">
+        {av['emoji']} {av['nome']} › {ld['titolo']}
+      </div>
+      <div style="font-family:'DM Serif Display',serif;font-size:1.75rem;color:#F5F0E8;">
+        {'⚔ Boss Fight' if boss else f'Domanda {qi+1} di {len(qs)}'}
+      </div>
+    </div>
+    <div class="xp-track" style="margin-bottom:24px;height:2px;">
+      <div style="height:100%;width:{qi/len(qs)*100:.0f}%;background:{'linear-gradient(90deg,#C4522A,#E8C876)' if boss else f'linear-gradient(90deg,{acc},{acc}88)'};border-radius:1px;transition:width .5s;"></div>
     </div>""", unsafe_allow_html=True)
-
-    pc = f"linear-gradient(90deg,#fc8181,#f6ad55)" if boss else f"linear-gradient(90deg,{acc},{acc}88)"
-    st.markdown(f'<div class="xp-bar-container" style="margin-bottom:24px;height:7px;"><div style="height:100%;width:{qi/len(qs)*100:.0f}%;border-radius:50px;background:{pc};box-shadow:0 0 8px {acc}40;transition:width .5s;"></div></div>', unsafe_allow_html=True)
 
     if qi < len(qs):
         q = qs[qi]
-        cq, ci = st.columns([3,1])
+        cq, ci = st.columns([3, 1])
         with cq:
-            bc2 = "rgba(252,129,129,0.22)" if boss else "rgba(99,179,237,0.15)"
-            al  = acc if not boss else "#fc8181"
+            bc = "rgba(196,82,42,0.2)" if boss else f"rgba(201,168,76,0.08)"
+            bl = "#C4522A" if boss else acc
             st.markdown(f"""
-            <div style="background:rgba(10,14,26,0.95);border:1px solid {bc2};border-left:3px solid {al};
-                 border-radius:16px;padding:26px;margin-bottom:20px;">
-                <div style="color:#e2e8f0;font-size:0.99rem;font-weight:500;line-height:1.75;">{q['domanda']}</div>
+            <div style="background:#0D101A;border:1px solid {bc};border-left:3px solid {bl};border-radius:3px;padding:28px;margin-bottom:20px;">
+              <div style="font-family:'Outfit',sans-serif;font-size:0.95rem;color:#C8C0B0;line-height:1.85;">{q['testo']}</div>
             </div>""", unsafe_allow_html=True)
 
-            if st.session_state.risposta_data is None:
+            if st.session_state.risposta is None:
                 for j, opt in enumerate(q["opzioni"]):
                     if st.button(opt, key=f"o{j}", use_container_width=True):
-                        st.session_state.risposta_data = j
-                        if j == q["corretta"]: st.session_state.punteggio_quiz += 1
+                        st.session_state.risposta = j
+                        if j == q["corretta"]: st.session_state.score += 1
                         st.rerun()
             else:
-                sc = st.session_state.risposta_data; co = q["corretta"]
-                if sc == co:
-                    st.markdown(f'<div class="feedback-correct"><div style="color:#68d391;font-weight:700;margin-bottom:8px;">✅ Esatto!</div><div style="color:#a7f3d0;font-size:0.88rem;line-height:1.7;">{q["spiegazione"]}</div></div>', unsafe_allow_html=True)
+                sc2 = st.session_state.risposta; co = q["corretta"]
+                if sc2 == co:
+                    st.markdown(f'<div class="fb-correct fade-up"><div style="font-family:DM Mono,monospace;font-size:0.72rem;letter-spacing:2px;color:#2E7D52;text-transform:uppercase;margin-bottom:10px;">✓ Risposta corretta</div><div style="color:#A7C4A0;font-size:0.88rem;line-height:1.8;">{q["spiegazione"]}</div></div>', unsafe_allow_html=True)
                 else:
-                    st.markdown(f'<div class="feedback-wrong"><div style="color:#fc8181;font-weight:700;margin-bottom:6px;">❌ Non corretto.</div><div style="color:#fca5a5;font-size:0.84rem;margin-bottom:8px;">Risposta corretta: <strong>{q["opzioni"][co]}</strong></div><div style="color:#fca5a5;font-size:0.84rem;line-height:1.7;opacity:.88;">{q["spiegazione"]}</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="fb-wrong fade-up"><div style="font-family:DM Mono,monospace;font-size:0.72rem;letter-spacing:2px;color:#C4522A;text-transform:uppercase;margin-bottom:8px;">✗ Non corretto</div><div style="color:#C4522A;font-size:0.82rem;margin-bottom:10px;">Risposta esatta: <strong style="color:#E8C876;">{q["opzioni"][co]}</strong></div><div style="color:#A09080;font-size:0.84rem;line-height:1.8;">{q["spiegazione"]}</div></div>', unsafe_allow_html=True)
                 st.markdown("<br>", unsafe_allow_html=True)
-                nl = "➡️ Prossima" if qi < len(qs)-1 else "🏁 Risultato"
+                nl = "Prossima  →" if qi < len(qs)-1 else "Risultato  ◈"
                 if st.button(nl, key="nx", use_container_width=True):
-                    st.session_state.domanda_idx += 1; st.session_state.risposta_data = None
-                    if st.session_state.domanda_idx >= len(qs): st.session_state.fase = "risultato"
+                    st.session_state.qidx += 1; st.session_state.risposta = None
+                    if st.session_state.qidx >= len(qs): st.session_state.fase = "risultato"
                     st.rerun()
 
         with ci:
-            for val, lbl, col in [(f"+{ld['xp']}","XP in palio","#f6ad55"),(f"{st.session_state.punteggio_quiz}/{qi}","Corrette","#68d391"),(st.session_state.xp,"XP Totali","#a78bfa")]:
-                st.markdown(f'<div style="background:rgba(10,14,26,0.9);border:1px solid rgba(99,179,237,0.1);border-radius:13px;padding:16px;text-align:center;margin-bottom:10px;"><div style="color:{col};font-family:Syne,sans-serif;font-size:1.5rem;font-weight:800;">{val}</div><div style="color:#1e293b;font-size:0.68rem;text-transform:uppercase;letter-spacing:1px;margin-top:2px;">{lbl}</div></div>', unsafe_allow_html=True)
+            for val,lbl,c in [(f"+{ld['xp']}","XP in palio","#C9A84C"),(f"{st.session_state.score}/{qi}","Corrette","#2A7B7C"),(st.session_state.xp,"XP Totali","#5C3D8A")]:
+                st.markdown(f'<div style="background:#0D101A;border:1px solid rgba(201,168,76,0.1);border-radius:3px;padding:16px;text-align:center;margin-bottom:8px;"><div style="font-family:DM Serif Display,serif;font-size:1.6rem;color:{c};">{val}</div><div style="font-family:DM Mono,monospace;font-size:0.58rem;color:#3D4A5C;text-transform:uppercase;letter-spacing:1.5px;margin-top:3px;">{lbl}</div></div>', unsafe_allow_html=True)
 
-# ─── RISULTATO ─────────────────────────────────────────────────────────────────
+# ─── RISULTATO ────────────────────────────────────────────────────────────────
 elif st.session_state.fase == "risultato":
-    area=st.session_state.area_corrente; li=st.session_state.livello_corrente
-    ld=MISSIONS[area]["livelli"][li]; sc=st.session_state.punteggio_quiz; tot=len(ld["domande"])
+    ak=st.session_state.area; li=st.session_state.liv
+    ld=MISSIONS[ak]["livelli"][li]; sc=st.session_state.score; tot=len(ld["domande"])
     pct=sc/tot; boss=ld.get("boss",False); xpb=ld["xp"]
-    if pct==1.0: xpg=xpb;  ri="🏆"; rt="Perfetto! Masterclass!"; col="#68d391"; st="⭐⭐⭐"
-    elif pct>=.67: xpg=int(xpb*.7); ri="✅"; rt="Missione completata!"; col="#63b3ed"; st="⭐⭐"
-    else: xpg=int(xpb*.3); ri="📚"; rt="Ripassate e riprovate!"; col="#f6ad55"; st="⭐"
-    mid=missione_id(area,li); done=mid in st.session_state.missioni_completate
+    if pct==1.0: xpg=xpb; ri="◈"; rt="Prestazione Perfetta"; c="#C9A84C"; st2="★★★"
+    elif pct>=.67: xpg=int(xpb*.7); ri="▶"; rt="Missione Superata"; c="#2A7B7C"; st2="★★"
+    else: xpg=int(xpb*.3); ri="◌"; rt="Risultato Insufficiente"; c="#C4522A"; st2="★"
+    m=mid(ak,li); done=m in st.session_state.completate
     if pct>=.67 and not done:
-        st.session_state.missioni_completate.append(mid); st.session_state.xp+=xpg; st.session_state.streak+=1
+        st.session_state.completate.append(m); st.session_state.xp+=xpg; st.session_state.streak+=1
     elif pct<.67:
         st.session_state.streak=0; st.session_state.xp+=xpg
-    nb=check_badge(); save_progress()
+    nb=check_badges(); save_progress()
     c1,c2,c3=st.columns([1,2,1])
     with c2:
         st.markdown(f"""
-        <div style="text-align:center;padding:36px 28px;background:rgba(10,14,26,0.95);border:1px solid {col}25;border-radius:26px;margin-bottom:18px;box-shadow:0 0 35px {col}08;">
-            <div style="font-size:4rem;margin-bottom:10px;">{ri}</div>
-            <div style="font-size:1.3rem;margin-bottom:10px;">{st}</div>
-            <div style="font-family:'Syne',sans-serif;font-size:1.6rem;font-weight:800;color:#e2e8f0;margin-bottom:5px;">{rt}</div>
-            <div style="color:#334155;font-size:0.82rem;margin-bottom:24px;">{'⚔️ Boss sconfitto!' if boss and pct>=.67 else ld['titolo']}</div>
-            <div style="display:flex;justify-content:center;gap:36px;">
-                {"".join([f'<div><div style="font-family:Syne,sans-serif;font-size:2.5rem;font-weight:800;color:{c};line-height:1;">{v}</div><div style="color:#334155;font-size:0.68rem;text-transform:uppercase;letter-spacing:1px;margin-top:3px;">{l}</div></div>' for v,l,c in [(f"{sc}/{tot}","Corrette",col),(f"+{xpg}","XP","#f6ad55"),(st.session_state.xp,"Totale","#a78bfa")]])}
-            </div>
+        <div style="background:#0D101A;border:1px solid {c}25;border-top:3px solid {c};border-radius:3px;padding:44px;text-align:center;margin-bottom:16px;" class="fade-up">
+          <div style="font-family:'DM Mono',monospace;font-size:1.8rem;color:{c};margin-bottom:10px;">{st2}</div>
+          <div style="font-family:'DM Serif Display',serif;font-size:2rem;color:#F5F0E8;margin-bottom:5px;">{rt}</div>
+          <div style="font-family:'DM Mono',monospace;font-size:0.65rem;color:#3D4A5C;letter-spacing:2px;margin-bottom:30px;">{'⚔ BOSS SCONFITTO' if boss and pct>=.67 else ld['titolo'].upper()}</div>
+          <div style="display:flex;justify-content:center;gap:48px;">
+            {''.join([f'<div><div style="font-family:DM Serif Display,serif;font-size:2.8rem;color:{col};line-height:1;">{v}</div><div style="font-family:DM Mono,monospace;font-size:0.6rem;color:#3D4A5C;text-transform:uppercase;letter-spacing:2px;margin-top:3px;">{l}</div></div>' for v,l,col in [(f"{sc}/{tot}","Corrette",c),(f"+{xpg}","XP","#C9A84C"),(st.session_state.xp,"Totale","#5C3D8A")]])}
+          </div>
         </div>""", unsafe_allow_html=True)
         for em,nm,ds in nb:
-            st.markdown(f'<div style="background:rgba(246,173,85,0.07);border:1px solid rgba(246,173,85,0.22);border-radius:14px;padding:18px;text-align:center;margin-bottom:10px;"><div style="font-size:2.2rem;margin-bottom:6px;">{em}</div><div style="color:#f6ad55;font-weight:700;">🎖️ Badge: {nm}!</div><div style="color:#78716c;font-size:0.82rem;margin-top:3px;">{ds}</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="background:#100D00;border:1px solid rgba(201,168,76,0.3);border-top:2px solid #C9A84C;border-radius:3px;padding:18px;text-align:center;margin-bottom:10px;" class="fade-up"><div style="font-size:1.8rem;margin-bottom:5px;">{em}</div><div style="font-family:DM Serif Display,serif;color:#C9A84C;font-size:1rem;">Badge: {nm}</div><div style="font-family:DM Mono,monospace;font-size:0.65rem;color:#5C4A20;margin-top:3px;">{ds}</div></div>', unsafe_allow_html=True)
         cc1,cc2,cc3=st.columns(3)
         with cc1:
-            if st.button("🔄 Riprova", use_container_width=True):
-                st.session_state.domanda_idx=0; st.session_state.risposta_data=None; st.session_state.punteggio_quiz=0; st.session_state.fase="quiz"; st.rerun()
+            if st.button("◌  Riprova", use_container_width=True):
+                st.session_state.qidx=0; st.session_state.risposta=None; st.session_state.score=0; st.session_state.fase="quiz"; st.rerun()
         with cc2:
-            if st.button("🗺️ Mappa", use_container_width=True): st.session_state.fase="home"; st.rerun()
+            if st.button("◈  Mappa", use_container_width=True): st.session_state.fase="home"; st.rerun()
         with cc3:
-            if st.button("🏆 Classifica", use_container_width=True): st.session_state.fase="leaderboard"; st.rerun()
+            if st.button("▲  Classifica", use_container_width=True): st.session_state.fase="leaderboard"; st.rerun()
 
-# ─── LEADERBOARD ───────────────────────────────────────────────────────────────
+# ─── LEADERBOARD ─────────────────────────────────────────────────────────────
 elif st.session_state.fase == "leaderboard":
-    st.markdown('<div style="font-family:Syne,sans-serif;font-size:1.9rem;font-weight:800;color:#e2e8f0;margin-bottom:4px;">🏆 Leaderboard</div>', unsafe_allow_html=True)
-    st.markdown('<div style="color:#334155;margin-bottom:20px;">Classifica in tempo reale di tutti gli studenti del corso</div>', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="masthead" style="margin-bottom:28px;">
+      <div class="masthead-date">Classifica Generale — {datetime.now().strftime("%d %B %Y")}</div>
+      <div class="masthead-title" style="font-size:2.5rem;">Leaderboard</div>
+    </div>""", unsafe_allow_html=True)
     c1,c2=st.columns([1,3])
     with c1:
-        if st.button("🔄 Aggiorna", use_container_width=True): st.rerun()
+        if st.button("◌  Aggiorna", use_container_width=True): st.rerun()
     with c2:
-        st.markdown('<div style="background:rgba(99,179,237,0.05);border:1px solid rgba(99,179,237,0.12);border-radius:9px;padding:9px 14px;color:#334155;font-size:0.79rem;">💡 Configura Firebase (vedi README) per la classifica in tempo reale. Senza Firebase mostra solo il giocatore corrente.</div>', unsafe_allow_html=True)
+        st.markdown('<div style="background:#0D101A;border:1px solid rgba(201,168,76,0.1);border-radius:3px;padding:10px 14px;color:#3D4A5C;font-family:DM Mono,monospace;font-size:0.7rem;">Configura Firebase per la classifica condivisa. Senza configurazione mostra solo il giocatore corrente.</div>', unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
     entries = get_leaderboard()
     if not entries and st.session_state.xp > 0:
         lv,tit=get_livello(st.session_state.xp)
-        entries=[{"nome":st.session_state.nome_studente,"xp":st.session_state.xp,"missioni":len(st.session_state.missioni_completate),"streak":st.session_state.streak,"badge":len(st.session_state.badge_guadagnati),"livello":lv,"titolo":tit}]
-    re=["🥇","🥈","🥉"]; rc=["#f6ad55","#94a3b8","#cd7f32"]
-    for i, e in enumerate(entries[:25]):
-        me = e.get("nome","") == st.session_state.nome_studente
-        ri = re[i] if i<3 else f"#{i+1}"; rc2 = rc[i] if i<3 else "#1e293b"
-        br = "rgba(246,173,85,0.35)" if me else "rgba(99,179,237,0.08)"; bg = "rgba(246,173,85,0.04)" if me else "rgba(10,14,26,0.8)"
+        entries=[{"nome":st.session_state.nome,"xp":st.session_state.xp,"missioni":len(st.session_state.completate),"streak":st.session_state.streak,"badge":len(st.session_state.badge),"livello":lv,"titolo":tit}]
+    medals=["◈","▲","◉"]; mcol=["#C9A84C","#8A94A6","#C4522A"]
+    for i,e in enumerate(entries[:25]):
+        me=e.get("nome","")==st.session_state.nome
+        ri=medals[i] if i<3 else f"#{i+1}"; rc=mcol[i] if i<3 else "#3D4A5C"
+        br="rgba(201,168,76,0.35)" if me else "rgba(201,168,76,0.06)"
+        bg="#100D00" if me else "#0D101A"
         st.markdown(f"""
-        <div style="background:{bg};border:1px solid {br};border-radius:13px;padding:14px 20px;margin-bottom:7px;display:flex;align-items:center;gap:18px;">
-            <div style="color:{rc2};font-family:Syne,sans-serif;font-size:1.25rem;font-weight:800;min-width:38px;">{ri}</div>
-            <div style="flex:1;">
-                <div style="color:#e2e8f0;font-weight:600;font-size:0.92rem;">{e.get('nome','?')} {'<span style="color:#f6ad55;font-size:0.7rem;">(tu)</span>' if me else ''}</div>
-                <div style="color:#1e293b;font-size:0.72rem;margin-top:1px;">Lv.{e.get('livello',1)} · {e.get('titolo','')}</div>
-            </div>
-            {"".join([f'<div style="text-align:center;min-width:48px;"><div style="color:{c};font-family:Syne,sans-serif;font-size:1.1rem;font-weight:800;">{v}</div><div style="color:#1e293b;font-size:0.62rem;text-transform:uppercase;letter-spacing:1px;">{l}</div></div>' for v,l,c in [(e.get('xp',0),"XP","#63b3ed"),(e.get('missioni',0),"Quest","#68d391"),(f"{e.get('streak',0)}🔥","Streak","#f6ad55"),(e.get('badge',0),"Badge","#a78bfa")]])}
+        <div class="lb-row {'me' if me else ''}" style="background:{bg};border-color:{br};">
+          <div style="font-family:DM Serif Display,serif;font-size:1.4rem;color:{rc};min-width:36px;">{ri}</div>
+          <div style="flex:1;">
+            <div style="color:#C8C0B0;font-weight:600;font-size:0.9rem;">{e.get('nome','?')} {'<span style="font-family:DM Mono,monospace;font-size:0.6rem;color:#C9A84C;">(tu)</span>' if me else ''}</div>
+            <div style="font-family:DM Mono,monospace;font-size:0.63rem;color:#3D4A5C;margin-top:1px;">{e.get('titolo','')}</div>
+          </div>
+          {''.join([f'<div style="text-align:center;min-width:50px;"><div style="font-family:DM Serif Display,serif;font-size:1.15rem;color:{c};">{v}</div><div style="font-family:DM Mono,monospace;font-size:0.55rem;color:#3D4A5C;text-transform:uppercase;letter-spacing:1px;">{l}</div></div>' for v,l,c in [(e.get("xp",0),"XP","#C9A84C"),(e.get("missioni",0),"Quest","#2A7B7C"),(f'{e.get("streak",0)}🔥',"Streak","#C4522A"),(e.get("badge",0),"Badge","#5C3D8A")]])}
         </div>""", unsafe_allow_html=True)
-    if not entries:
-        st.markdown('<div style="text-align:center;padding:50px;color:#334155;"><div style="font-size:3rem;margin-bottom:14px;">🏆</div><div style="color:#475569;">Inizia a giocare per apparire nella classifica!</div></div>', unsafe_allow_html=True)
 
-# ─── PROFILO ───────────────────────────────────────────────────────────────────
+# ─── PROFILO ─────────────────────────────────────────────────────────────────
 elif st.session_state.fase == "profilo":
-    lv,titolo=get_livello(st.session_state.xp); xn=xp_to_next(st.session_state.xp); xp2=xp_threshold(lv)
+    lv,titolo=get_livello(st.session_state.xp)
+    xn=xp_next_thresh(st.session_state.xp)
+    xp2=[0,150,400,800,1400,2200,3200,4500][min(lv-1,7)]
     prog=min((st.session_state.xp-xp2)/max(xn-xp2,1),1.0)
-    st.markdown(f'<div style="font-family:Syne,sans-serif;font-size:1.9rem;font-weight:800;color:#e2e8f0;margin-bottom:3px;">👤 {st.session_state.nome_studente}</div><div style="color:#a78bfa;margin-bottom:24px;">{titolo} · Livello {lv}</div>', unsafe_allow_html=True)
     tm=sum(len(v["livelli"]) for v in MISSIONS.values())
+    COLORS2={"gold":"#C9A84C","blue":"#2C5F8A","teal":"#2A7B7C","rust":"#C4522A","purple":"#5C3D8A"}
+
+    st.markdown(f"""
+    <div class="masthead" style="margin-bottom:28px;">
+      <div class="masthead-date">Profilo Studente — {datetime.now().strftime("%d %B %Y")}</div>
+      <div class="masthead-title" style="font-size:2.5rem;">{st.session_state.nome}</div>
+      <div style="font-family:DM Mono,monospace;font-size:0.7rem;color:#C9A84C;margin-top:4px;">{titolo} · Livello {lv} · {st.session_state.xp} XP</div>
+    </div>""", unsafe_allow_html=True)
+
     cs=st.columns(5)
-    for col,(ico,lbl,val,c) in zip(cs,[("🎯","XP",st.session_state.xp,"#63b3ed"),("📚","Missioni",f"{len(st.session_state.missioni_completate)}/{tm}","#68d391"),("⚡","Livello",lv,"#a78bfa"),("🔥","Streak",st.session_state.streak,"#f6ad55"),("🎖️","Badge",len(st.session_state.badge_guadagnati),"#fc8181")]):
+    for col,(ico,lbl,val,c) in zip(cs,[("◈","XP",st.session_state.xp,"#C9A84C"),("▶","Missioni",f"{len(st.session_state.completate)}/{tm}","#2A7B7C"),("◉","Livello",lv,"#5C3D8A"),("🔥","Streak",st.session_state.streak,"#C4522A"),("★","Badge",len(st.session_state.badge),"#2C5F8A")]):
         with col:
-            st.markdown(f'<div class="stat-card"><div style="font-size:1.3rem;margin-bottom:4px;">{ico}</div><div style="font-family:Syne,sans-serif;font-size:1.7rem;font-weight:800;color:{c};line-height:1;">{val}</div><div style="color:#1e293b;font-size:0.67rem;text-transform:uppercase;letter-spacing:1.5px;margin-top:3px;">{lbl}</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="background:#0D101A;border:1px solid rgba(201,168,76,0.1);border-top:2px solid {c};border-radius:3px;padding:18px;text-align:center;"><div style="font-family:DM Serif Display,serif;font-size:1.8rem;color:{c};margin-bottom:3px;">{val}</div><div style="font-family:DM Mono,monospace;font-size:0.6rem;color:#3D4A5C;text-transform:uppercase;letter-spacing:1.5px;">{lbl}</div></div>', unsafe_allow_html=True)
+
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown(f'<div style="background:rgba(10,14,26,0.9);border:1px solid rgba(99,179,237,0.1);border-radius:15px;padding:22px;margin-bottom:18px;"><div style="display:flex;justify-content:space-between;margin-bottom:10px;"><span style="color:#e2e8f0;font-weight:600;">Avanzamento Lv.{lv+1}</span><span style="color:#63b3ed;font-weight:600;">{st.session_state.xp}/{xn} XP</span></div><div class="xp-bar-container" style="height:12px;"><div class="xp-bar-fill" style="width:{prog*100:.0f}%;"></div></div><div style="color:#1e293b;font-size:0.75rem;margin-top:8px;">Ancora {xn-st.session_state.xp} XP al prossimo livello</div></div>', unsafe_allow_html=True)
-    st.markdown('<div style="color:#e2e8f0;font-weight:600;margin-bottom:12px;">📊 Progresso per Area</div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="background:#0D101A;border:1px solid rgba(201,168,76,0.1);border-radius:3px;padding:22px;margin-bottom:20px;"><div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-family:DM Mono,monospace;font-size:0.65rem;color:#5C6878;text-transform:uppercase;letter-spacing:2px;">Prossimo Livello</span><span style="font-family:DM Mono,monospace;font-size:0.68rem;color:#C9A84C;">{st.session_state.xp} / {xn} XP</span></div><div class="xp-track" style="height:5px;"><div class="xp-fill" style="width:{prog*100:.0f}%;"></div></div><div style="font-family:DM Mono,monospace;font-size:0.6rem;color:#3D4A5C;margin-top:6px;">Ancora {xn-st.session_state.xp} XP al Livello {lv+1}</div></div>', unsafe_allow_html=True)
+
+    st.markdown('<div style="font-family:DM Serif Display,serif;font-size:1.1rem;color:#F5F0E8;margin-bottom:12px;">Progressione per Area</div>', unsafe_allow_html=True)
     ac=st.columns(len(MISSIONS))
     for col,(ak,av) in zip(ac,MISSIONS.items()):
-        done=sum(1 for m in st.session_state.missioni_completate if ak in m); tot=len(av["livelli"]); pg=done/tot; acc=av["accent"]
+        done=sum(1 for m in st.session_state.completate if ak in m); tot=len(av["livelli"]); pg=done/tot; acc=COLORS2.get(av["colore"],"#C9A84C")
         with col:
-            st.markdown(f'<div style="background:rgba(10,14,26,0.9);border:1px solid rgba(99,179,237,0.08);border-radius:13px;padding:14px;text-align:center;"><div style="font-size:1.5rem;margin-bottom:6px;">{av["emoji"]}</div><div style="color:#e2e8f0;font-size:0.75rem;font-weight:600;margin-bottom:8px;">{done}/{tot}</div><div class="xp-bar-container" style="height:5px;"><div style="height:100%;width:{pg*100:.0f}%;border-radius:50px;background:{acc};box-shadow:0 0 5px {acc}70;"></div></div></div>', unsafe_allow_html=True)
-    st.markdown('<br><div style="color:#e2e8f0;font-weight:600;margin-bottom:12px;">🎖️ Badge Collection</div>', unsafe_allow_html=True)
-    bdef={"xp100":("🌟","Prima Stella","100 XP"),"xp500":("⚡","Mezz'Opera","500 XP"),"xp1000":("💎","Mille XP","1000 XP"),"xp2000":("👑","Duemila XP","2000 XP"),
-          **{f"{ak}_master":(av["emoji"],f"Master {ak.title()}",f"Missioni {ak} complete") for ak,av in MISSIONS.items()},
-          "champion":("🏆","Champion","Tutto completato!"),"streak5":("🔥","On Fire!","5 consecutive")}
-    bc2=st.columns(5)
-    for i,(bid,(em,nm,ds)) in enumerate(bdef.items()):
-        with bc2[i%5]:
-            got=bid in st.session_state.badge_guadagnati; op="1" if got else "0.18"; gl=f"0 0 10px rgba(246,173,85,0.2)" if got else "none"
-            st.markdown(f'<div style="background:rgba(10,14,26,0.9);border:1px solid {"rgba(246,173,85,0.28)" if got else "rgba(99,179,237,0.07)"};border-radius:13px;padding:14px;text-align:center;opacity:{op};margin-bottom:8px;box-shadow:{gl};"><div style="font-size:1.8rem;margin-bottom:5px;">{em}</div><div style="color:#e2e8f0;font-size:0.76rem;font-weight:600;">{nm}</div><div style="color:#1e293b;font-size:0.66rem;margin-top:1px;">{ds}</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="background:#0D101A;border:1px solid rgba(201,168,76,0.08);border-radius:3px;padding:14px;text-align:center;"><div style="font-family:DM Serif Display,serif;font-size:1.3rem;color:{acc};margin-bottom:5px;">{av["emoji"]}</div><div style="font-family:DM Mono,monospace;font-size:0.68rem;color:{acc};margin-bottom:6px;">{done}/{tot}</div><div class="xp-track" style="height:3px;"><div style="height:100%;width:{pg*100:.0f}%;background:{acc};border-radius:1px;"></div></div></div>', unsafe_allow_html=True)
+
+    st.markdown('<br><div style="font-family:DM Serif Display,serif;font-size:1.1rem;color:#F5F0E8;margin-bottom:12px;">Badge Collection</div>', unsafe_allow_html=True)
+    bdef={"lv2":("📊","Analista Trainee"),"lv3":("📈","Junior Analyst"),"lv4":("💼","Associate"),"lv5":("🏛","Vice President"),"lv6":("◈","Director"),"lv7":("🎩","MD"),
+          **{f"{ak}_m":(av["emoji"],f"Master {av['nome']}") for ak,av in MISSIONS.items()},
+          "champ":("🏆","Champion"),"fire":("🔥","On Fire"),"inferno":("⚡","Inferno")}
+    bc2=st.columns(6)
+    for i,(bid,(em,nm)) in enumerate(bdef.items()):
+        with bc2[i%6]:
+            got=bid in st.session_state.badge; op="1" if got else "0.15"
+            bc3="rgba(201,168,76,0.25)" if got else "rgba(201,168,76,0.05)"
+            st.markdown(f'<div style="background:#0D101A;border:1px solid {bc3};border-radius:3px;padding:12px;text-align:center;opacity:{op};margin-bottom:8px;"><div style="font-size:1.5rem;margin-bottom:4px;">{em}</div><div style="font-family:DM Mono,monospace;font-size:0.58rem;color:{"#C9A84C" if got else "#3D4A5C"};">{nm}</div></div>', unsafe_allow_html=True)
